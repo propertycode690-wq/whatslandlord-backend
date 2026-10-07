@@ -95,6 +95,11 @@ class SecondaryService {
             where: whereClause,
         });
     }
+    async deleteNotification(id) {
+        return database_1.default.notification.deleteMany({
+            where: { id },
+        });
+    }
     // Documents
     async getDocuments(companyId) {
         return database_1.default.document.findMany({

@@ -11,6 +11,8 @@ const paymentMethodEnum = z.enum([
   'Check',
   'MoneyOrder',
   'Zelle',
+  'Offline',
+  'Offline (Partial)',
 ]);
 
 export const createPaymentSchema = z.object({

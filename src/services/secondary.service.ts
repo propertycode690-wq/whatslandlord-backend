@@ -101,6 +101,12 @@ export class SecondaryService {
     });
   }
 
+  async deleteNotification(id: string) {
+    return prisma.notification.deleteMany({
+      where: { id },
+    });
+  }
+
   // Documents
   async getDocuments(companyId?: string) {
     return prisma.document.findMany({

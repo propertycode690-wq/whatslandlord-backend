@@ -1192,6 +1192,8 @@ enum PaymentMethod {
   Check
   MoneyOrder
   Zelle
+  Offline
+  Offline_Partial
 }
 
 enum Priority {

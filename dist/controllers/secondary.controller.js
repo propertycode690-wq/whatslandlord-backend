@@ -111,6 +111,16 @@ class SecondaryController {
             next(error);
         }
     }
+    async deleteNotification(req, res, next) {
+        try {
+            const id = req.params.id;
+            const result = await secondary_service_1.secondaryService.deleteNotification(id);
+            return (0, apiResponse_1.sendSuccess)({ res, data: result, message: 'Notification deleted successfully' });
+        }
+        catch (error) {
+            next(error);
+        }
+    }
     // Documents
     async getDocuments(req, res, next) {
         try {
