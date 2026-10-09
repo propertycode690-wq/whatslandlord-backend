@@ -155,6 +155,7 @@ export class SecondaryService {
     let occupancyRateVal = 0;
     let tenantsCount = 0;
     let leasesCount = 0;
+    let expiringLeasesCount = 0;
     let overduePaymentsCount = 0;
     let overdueTotalAmount = 0;
     let overdueTenantDetails = '';
@@ -210,14 +211,22 @@ export class SecondaryService {
       const companyFilter = companyId ? { companyId } : {};
       const unitWhere = companyId ? { property: { companyId } } : {};
 
+      const startOfMonth = new Date();
+      startOfMonth.setDate(1);
+      startOfMonth.setHours(0, 0, 0, 0);
+      const endOfMonth = new Date(startOfMonth);
+      endOfMonth.setMonth(endOfMonth.getMonth() + 1);
+
       const [
         properties,
         totalUnits,
         occupiedUnits,
         activeTenantsCount,
         activeLeasesCount,
-        overduePayments,
-        openWorkOrders,
+        expiringLeasesDataCount,
+        overdueInvoices,
+        openWorkOrdersCount,
+        openWorkOrdersList,
         owners,
       ] = await Promise.all([
         prisma.property.findMany({ where: companyFilter, select: { id: true, name: true, unitsCount: true } }),
@@ -225,10 +234,13 @@ export class SecondaryService {
         prisma.unit.count({ where: { ...unitWhere, status: 'Occupied' } }),
         prisma.tenant.count({ where: companyFilter }),
         prisma.lease.count({ where: { ...companyFilter, status: 'Active' as any } }),
-        (prisma.rentPayment as any).findMany({
-          where: { ...companyFilter, status: 'Pending' },
-          include: { tenant: { select: { firstName: true, lastName: true } }, property: { select: { name: true } } },
-          take: 5,
+        prisma.lease.count({ where: { ...companyFilter, status: 'Active' as any, endDate: { gte: startOfMonth, lt: endOfMonth } } }),
+        prisma.invoice.findMany({
+          where: { ...companyFilter, status: { in: ['Overdue', 'Unpaid'] } },
+          include: { tenant: { select: { firstName: true, lastName: true } } },
+        }),
+        prisma.workOrder.count({
+          where: { ...companyFilter, status: 'Open' },
         }),
         prisma.workOrder.findMany({
           where: { ...companyFilter, status: 'Open' },
@@ -251,14 +263,18 @@ export class SecondaryService {
       occupancyRateVal = totalUnits > 0 ? Math.round((occupiedUnits / totalUnits) * 100) : 0;
       tenantsCount = activeTenantsCount;
       leasesCount = activeLeasesCount;
-      overduePaymentsCount = overduePayments.length;
-      overdueTotalAmount = (overduePayments as any[]).reduce((sum, p) => sum + (p.amount || 0), 0);
-      overdueTenantDetails = (overduePayments as any[])
-        .map((p) => `${p.tenant?.firstName || ''} ${p.tenant?.lastName || ''} ($${p.amount})`)
-        .join(', ');
-      workOrdersCount = openWorkOrders.length;
+      expiringLeasesCount = expiringLeasesDataCount;
+      overduePaymentsCount = overdueInvoices.length;
+      overdueTotalAmount = overdueInvoices.reduce((sum, inv) => sum + (inv.balance || inv.amount || 0), 0);
+      overdueTenantDetails = overdueInvoices
+        .slice(0, 5) // Limit the details string to 5 to keep the prompt size reasonable
+        .map((inv) => `${inv.tenant?.firstName || ''} ${inv.tenant?.lastName || ''} ($${inv.balance || inv.amount || 0})`)
+        .filter(Boolean)
+        .join(', ') + (overduePaymentsCount > 5 ? ' and more' : '');
+      workOrdersCount = openWorkOrdersCount;
+      const workOrderDetails = openWorkOrdersList.map(wo => `${wo.title} (${wo.priority})`).join(', ');
 
-      scopedContextText = `User Role: ${userRole} (Company ID: ${companyId || 'Global'}). Company Owners (${ownersCount}): [${ownerNames || 'None'}]. Portfolio: ${propertiesCount} Properties ([${propertyNames || 'None'}]), ${totalUnitsCount} Total Units (${occupiedUnitsCount} Occupied, ${vacantUnitsCount} Vacant, ${occupancyRateVal}% Occupancy Rate), ${tenantsCount} Active Tenants, ${leasesCount} Active Leases. Overdue Rent: ${overduePaymentsCount} tenants owing total $${overdueTotalAmount} (${overdueTenantDetails || 'None'}). Open Work Orders: ${workOrdersCount} pending.`;
+      scopedContextText = `User Role: ${userRole} (Company ID: ${companyId || 'Global'}). Company Owners (${ownersCount}): [${ownerNames || 'None'}]. Portfolio: ${propertiesCount} Properties ([${propertyNames || 'None'}]), ${totalUnitsCount} Total Units (${occupiedUnitsCount} Occupied, ${vacantUnitsCount} Vacant, ${occupancyRateVal}% Occupancy Rate), ${tenantsCount} Active Tenants, ${leasesCount} Active Leases (${expiringLeasesCount} expiring this month). Overdue Rent: ${overduePaymentsCount} tenants owing total $${overdueTotalAmount} (${overdueTenantDetails || 'None'}). Open Work Orders: ${workOrdersCount} pending (${workOrderDetails || 'None'}).`;
 
       suggestedActions = ['Show Overdue Rent Details', 'View Vacant Units', 'Check Maintenance Requests', 'Generate Rent Roll'];
       relatedRecords = properties.map((p) => `Property: ${p.name}`);
@@ -330,7 +346,7 @@ export class SecondaryService {
           ? `Maintenance Work Orders: There are currently ${workOrdersCount} open maintenance work orders pending resolution.`
           : `Maintenance Work Orders: All clear! There are no open maintenance work orders pending right now.`;
       } else if (q.includes('tenant') || q.includes('resident') || q.includes('lease')) {
-        responseText = `Tenants & Leases Overview: Your company has ${tenantsCount} active tenants and ${leasesCount} active leases on file.`;
+        responseText = `Tenants & Leases Overview: Your company has ${tenantsCount} active tenants and ${leasesCount} active leases on file (${expiringLeasesCount} expiring this month).`;
       } else if (q.includes('financial') || q.includes('revenue') || q.includes('report') || q.includes('statement')) {
         responseText = `Financial Metrics: Live double-entry accounting records are active. Total overdue rent outstanding is $${overdueTotalAmount} across ${overduePaymentsCount} delinquent accounts.`;
       } else {

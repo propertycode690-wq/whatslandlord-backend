@@ -106,6 +106,10 @@ export class ReportService {
     let data: any[] = [];
     if (leases.length > 0) {
       data = leases.map((l) => ({
+        id: l.id,
+        propertyId: l.propertyId,
+        unitId: l.unitId,
+        tenantId: l.tenantId,
         propertyName: l.property?.name || 'Property',
         unitNumber: l.unit?.unitNumber ? `Unit ${l.unit.unitNumber}` : 'Unit 101',
         tenantName: l.tenant ? `${l.tenant.firstName} ${l.tenant.lastName}` : 'Resident',
@@ -120,6 +124,9 @@ export class ReportService {
       data = unitsFallback.map((u) => {
         const tenantObj = u.tenants && u.tenants.length > 0 ? u.tenants[0] : null;
         return {
+          tenantId: tenantObj ? tenantObj.id : null,
+          propertyId: u.propertyId,
+          unitId: u.id,
           propertyName: u.property?.name || 'Property',
           unitNumber: u.unitNumber ? `Unit ${u.unitNumber}` : 'Unit 101',
           tenantName: tenantObj ? `${tenantObj.firstName} ${tenantObj.lastName}` : (u.status === 'Occupied' ? 'Tenant Assigned' : 'Vacant'),
@@ -197,6 +204,7 @@ export class ReportService {
       const occupancyPercentage = totalUnits > 0 ? parseFloat(((occupiedUnits / totalUnits) * 100).toFixed(1)) : 0.0;
 
       return {
+        propertyId: p.id,
         propertyName: p.name,
         totalUnits,
         occupiedUnits,
@@ -273,6 +281,9 @@ export class ReportService {
       const outstandingBalance = Number(inv.balance ?? Math.max(0, rentAmount - paidAmount));
 
       return {
+        invoiceId: inv.id,
+        tenantId: inv.tenantId,
+        propertyId: inv.propertyId,
         tenantName: inv.tenant ? `${inv.tenant.firstName} ${inv.tenant.lastName}` : (inv.tenantName || 'Resident'),
         propertyName: inv.propertyName || 'Property',
         unitNumber: inv.unitNumber || 'Unit 101',
@@ -452,6 +463,8 @@ export class ReportService {
       const st = w.status || 'Open';
 
       return {
+        workOrderId: w.id,
+        propertyId: w.propertyId,
         ticketId: `WO-${1001 + idx}`,
         propertyName: w.property?.name || w.propertyName || 'Property',
         unitNumber: w.unitNumber || 'Unit 101',
@@ -518,7 +531,10 @@ export class ReportService {
       sortOrder: query.sortOrder,
     });
 
-    let data = result.payments.map((p: any, idx: number) => ({
+    let data: any[] = result.payments.map((p: any, idx: number) => ({
+      paymentId: p.id,
+      tenantId: p.tenantId,
+      propertyId: p.propertyId,
       receiptNo: `#${idx + 1}`,
       tenantName: p.tenant ? `${p.tenant.firstName} ${p.tenant.lastName}` : (p.tenantName || 'Resident'),
       propertyName: p.property?.name || p.propertyName || 'Property',
@@ -541,6 +557,9 @@ export class ReportService {
       });
 
       data = paidInvoices.map((inv, idx) => ({
+        invoiceId: inv.id,
+        tenantId: inv.tenantId,
+        propertyId: inv.propertyId,
         receiptNo: `#INV-${1001 + idx}`,
         tenantName: inv.tenant ? `${inv.tenant.firstName} ${inv.tenant.lastName}` : (inv.tenantName || 'Resident'),
         propertyName: inv.propertyName || 'Property',
