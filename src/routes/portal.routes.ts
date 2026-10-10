@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { portalController } from '../controllers/portal.controller';
-import { uploadScreeningReportDoc } from '../middlewares/upload.middleware';
+import { uploadScreeningReportDoc, uploadDocument } from '../middlewares/upload.middleware';
 import { validateRequest } from '../middlewares/validate.middleware';
 import { createCrmLeadSchema } from '../validations/crm.validation';
 
@@ -17,7 +17,7 @@ router.post('/tenant/profile', (req, res, next) => portalController.updateTenant
 router.get('/tenant/maintenance', (req, res, next) => portalController.getTenantMaintenance(req, res, next));
 router.post('/tenant/maintenance', (req, res, next) => portalController.createTenantMaintenance(req, res, next));
 router.get('/tenant/documents', (req, res, next) => portalController.getTenantDocuments(req, res, next));
-router.post('/tenant/documents', (req, res, next) => portalController.uploadTenantDocument(req, res, next));
+router.post('/tenant/documents', uploadDocument.single('file'), (req, res, next) => portalController.uploadTenantDocument(req, res, next));
 router.get('/tenant/messages', (req, res, next) => portalController.getTenantMessages(req, res, next));
 router.post('/tenant/messages', (req, res, next) => portalController.createTenantMessage(req, res, next));
 router.get('/tenant/notifications', (req, res, next) => portalController.getTenantNotifications(req, res, next));
@@ -30,7 +30,7 @@ router.get('/owner/distributions', (req, res, next) => portalController.getOwner
 router.get('/owner/statements', (req, res, next) => portalController.getOwnerStatements(req, res, next));
 router.get('/owner/maintenance', (req, res, next) => portalController.getOwnerMaintenance(req, res, next));
 router.get('/owner/documents', (req, res, next) => portalController.getOwnerDocuments(req, res, next));
-router.post('/owner/documents', (req, res, next) => portalController.uploadOwnerDocument(req, res, next));
+router.post('/owner/documents', uploadDocument.single('file'), (req, res, next) => portalController.uploadOwnerDocument(req, res, next));
 router.get('/owner/messages', (req, res, next) => portalController.getOwnerMessages(req, res, next));
 router.post('/owner/messages', (req, res, next) => portalController.composeOwnerMessage(req, res, next));
 router.get('/owner/reports', (req, res, next) => portalController.getOwnerReports(req, res, next));

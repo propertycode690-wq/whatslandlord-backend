@@ -403,12 +403,42 @@ export class PortalController {
     try {
       const tenant = await this.getTenantForUser(req);
       const { name, category, size } = req.body;
+      const file = req.file;
+
+      let fileUrl: string | null = req.body.fileUrl || null;
+      let fileSizeStr = size || '1.5 MB';
+
+      if (file) {
+        try {
+          fileUrl = await new Promise<string>((resolve, reject) => {
+            const uploadStream = cloudinary.uploader.upload_stream(
+              { folder: 'tenant-documents', resource_type: 'auto' },
+              (error, result) => {
+                if (error) return reject(error);
+                resolve(result?.secure_url || '');
+              }
+            );
+            uploadStream.end(file.buffer);
+          });
+          const k = 1024;
+          const i = Math.floor(Math.log(file.size) / Math.log(k));
+          const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+          fileSizeStr = parseFloat((file.size / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+        } catch (err) {
+          console.error('Cloudinary tenant upload failed in portal:', err);
+        }
+      }
+
       const newDoc = await prisma.tenantDocument.create({
         data: {
-          name: name || 'Tenant_Document.pdf',
+          name: name || file?.originalname || 'Tenant_Document.pdf',
           category: category || 'Rental Agreement',
-          size: size || '1.5 MB',
+          size: fileSizeStr,
+          fileUrl,
           tenantId: tenant?.id || undefined,
+          companyId: tenant?.companyId || tenant?.leases?.[0]?.companyId || tenant?.unit?.property?.companyId || req.user?.companyId || undefined,
+          propertyId: tenant?.leases?.[0]?.propertyId || tenant?.unit?.propertyId || undefined,
+          unitId: tenant?.unitId || undefined,
         },
       });
 
@@ -421,6 +451,7 @@ export class PortalController {
           category: newDoc.category,
           uploadedAt: new Date(newDoc.uploadedAt).toISOString().split('T')[0],
           size: newDoc.size,
+          fileUrl: newDoc.fileUrl,
         },
       });
     } catch (error) {
@@ -720,15 +751,48 @@ export class PortalController {
   async uploadOwnerDocument(req: AuthenticatedRequest, res: Response, next: NextFunction) {
     try {
       const userEmail = req.user?.email;
-      const owner = userEmail ? await prisma.owner.findFirst({ where: { email: userEmail } }) : null;
+      const owner = userEmail
+        ? await prisma.owner.findFirst({
+            where: { email: userEmail },
+            include: { properties: true },
+          })
+        : null;
       const { name, category, size } = req.body;
+      const file = req.file;
+
+      let fileUrl: string | null = req.body.fileUrl || null;
+      let fileSizeStr = size || '1.5 MB';
+
+      if (file) {
+        try {
+          fileUrl = await new Promise<string>((resolve, reject) => {
+            const uploadStream = cloudinary.uploader.upload_stream(
+              { folder: 'owner-documents', resource_type: 'auto' },
+              (error, result) => {
+                if (error) return reject(error);
+                resolve(result?.secure_url || '');
+              }
+            );
+            uploadStream.end(file.buffer);
+          });
+          const k = 1024;
+          const i = Math.floor(Math.log(file.size) / Math.log(k));
+          const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+          fileSizeStr = parseFloat((file.size / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+        } catch (err) {
+          console.error('Cloudinary owner upload failed in portal:', err);
+        }
+      }
 
       const newDoc = await prisma.ownerDocument.create({
         data: {
-          name: name || 'Document.pdf',
+          name: name || file?.originalname || 'Owner_Document.pdf',
           category: category || 'Statements',
-          size: size || '1.5 MB',
+          size: fileSizeStr,
+          fileUrl,
+          companyId: owner?.companyId || owner?.properties?.[0]?.companyId || req.user?.companyId || undefined,
           ownerId: owner?.id || undefined,
+          propertyId: owner?.properties?.[0]?.id || undefined,
         },
       });
 
@@ -741,6 +805,7 @@ export class PortalController {
           category: newDoc.category,
           uploadedAt: new Date(newDoc.uploadedAt).toISOString().split('T')[0],
           size: newDoc.size,
+          fileUrl: newDoc.fileUrl,
         },
       });
     } catch (error) {

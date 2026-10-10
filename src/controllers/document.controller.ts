@@ -31,7 +31,7 @@ export class DocumentController {
       try {
         fileUrl = await new Promise<string>((resolve, reject) => {
           const uploadStream = cloudinary.uploader.upload_stream(
-            { folder: 'owner-documents' },
+            { folder: 'owner-documents', resource_type: 'auto' },
             (error, result) => {
               if (error) return reject(error);
               resolve(result?.secure_url || '');
@@ -81,7 +81,7 @@ export class DocumentController {
       try {
         fileUrl = await new Promise<string>((resolve, reject) => {
           const uploadStream = cloudinary.uploader.upload_stream(
-            { folder: 'tenant-documents' },
+            { folder: 'tenant-documents', resource_type: 'auto' },
             (error, result) => {
               if (error) return reject(error);
               resolve(result?.secure_url || '');
@@ -136,10 +136,35 @@ export class DocumentController {
     try {
       const companyId = req.user?.companyId;
       const docs = await prisma.tenantDocument.findMany({
-        where: companyId ? { companyId } : {},
+        where: companyId
+          ? {
+              OR: [
+                { companyId },
+                { companyId: null },
+              ],
+            }
+          : {},
         orderBy: { uploadedAt: 'desc' },
       });
-      return sendSuccess({ res, data: docs });
+
+      const tenantIds = docs.map((d: any) => d.tenantId).filter(Boolean) as string[];
+      let tenantMap = new Map<string, string>();
+      if (tenantIds.length > 0) {
+        const tenants = await prisma.tenant.findMany({
+          where: { id: { in: tenantIds } },
+          select: { id: true, firstName: true, lastName: true },
+        });
+        tenants.forEach((t: any) => {
+          tenantMap.set(t.id, `${t.firstName || ''} ${t.lastName || ''}`.trim());
+        });
+      }
+
+      const enrichedDocs = docs.map((d: any) => ({
+        ...d,
+        tenantName: d.tenantId && tenantMap.has(d.tenantId) ? tenantMap.get(d.tenantId) : 'Resident Tenant',
+      }));
+
+      return sendSuccess({ res, data: enrichedDocs });
     } catch (error) {
       next(error);
     }

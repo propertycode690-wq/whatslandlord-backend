@@ -293,6 +293,8 @@ export class PaymentService {
         throw new AppError(`A payment with reference number "${refNum}" has already been processed.`, 400, 'DUPLICATE_PAYMENT');
       }
 
+      const createdByValue = data.createdBy || (data.userRole === 'Tenant' ? 'Tenant Portal' : 'Manager');
+
       const payment = await tx.rentPayment.create({
         data: {
           tenantId: tenantId,
@@ -305,6 +307,7 @@ export class PaymentService {
           status: 'Paid',
           paymentMethod: data.paymentMethod || 'ACH',
           referenceNumber: refNum,
+          createdBy: createdByValue,
           companyId: data.companyId || tenant?.companyId || property?.companyId,
         },
         include: {
@@ -447,6 +450,16 @@ export class PaymentService {
       throw new AppError('Payment record not found.', 404, 'NOT_FOUND');
     }
 
+    // Tenant online payments cannot be edited (locked by business rule)
+    const methodStr = String(existingPayment.paymentMethod || '');
+    if (
+      existingPayment.createdBy === 'Tenant' ||
+      existingPayment.createdBy === 'Tenant Portal' ||
+      ['Razorpay', 'Stripe', 'AuthorizeNet'].includes(methodStr)
+    ) {
+      throw new AppError('Online payments made from Tenant Portal cannot be modified.', 403, 'PAYMENT_LOCKED');
+    }
+
     const updateData: any = {};
     if (data.amount !== undefined) updateData.amount = Number(data.amount);
     if (data.paidDate !== undefined) updateData.paidDate = new Date(data.paidDate);
@@ -480,6 +493,27 @@ export class PaymentService {
           await tx.coAAccount.update({
             where: { id: incomeAccount.id },
             data: { balance: { increment: diff } },
+          });
+        }
+
+        // Sync associated invoice balance & status if any
+        const linkedInvoice = await tx.invoice.findFirst({
+          where: {
+            tenantId: existingPayment.tenantId,
+          },
+          orderBy: { createdAt: 'desc' },
+        });
+        if (linkedInvoice) {
+          const newPaidAmount = Math.max(0, (linkedInvoice.paidAmount || 0) + diff);
+          const newBalance = Math.max(0, linkedInvoice.amount - newPaidAmount);
+          const newStatus = newBalance <= 0 ? 'Paid' : (newPaidAmount > 0 ? 'Partially Paid' : 'Overdue');
+          await tx.invoice.update({
+            where: { id: linkedInvoice.id },
+            data: {
+              paidAmount: newPaidAmount,
+              balance: newBalance,
+              status: newStatus,
+            },
           });
         }
       }

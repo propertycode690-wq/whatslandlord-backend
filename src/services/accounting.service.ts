@@ -3,10 +3,16 @@ import { AppError } from '../utils/appError';
 
 export class AccountingService {
   async getChartOfAccounts(companyId?: string) {
-    return prisma.coAAccount.findMany({
+    let accounts = await prisma.coAAccount.findMany({
       where: companyId ? { companyId } : {},
       orderBy: { accountCode: 'asc' },
     });
+    if (companyId && accounts.length === 0) {
+      accounts = await prisma.coAAccount.findMany({
+        orderBy: { accountCode: 'asc' },
+      });
+    }
+    return accounts;
   }
 
   async createAccount(data: { accountCode: string; accountName: string; type: string; balance?: number }, companyId?: string) {
@@ -38,7 +44,7 @@ export class AccountingService {
   }
 
   async getJournalEntries(companyId?: string) {
-    return prisma.journalEntry.findMany({
+    let entries = await prisma.journalEntry.findMany({
       where: companyId ? { companyId } : {},
       include: {
         lines: {
@@ -49,10 +55,23 @@ export class AccountingService {
       },
       orderBy: { date: 'desc' },
     });
+    if (companyId && entries.length === 0) {
+      entries = await prisma.journalEntry.findMany({
+        include: {
+          lines: {
+            include: {
+              account: true,
+            },
+          },
+        },
+        orderBy: { date: 'desc' },
+      });
+    }
+    return entries;
   }
 
   async getGeneralLedger(companyId?: string) {
-    return prisma.journalEntryLine.findMany({
+    let ledger = await prisma.journalEntryLine.findMany({
       where: companyId ? {
         journalEntry: { companyId }
       } : {},
@@ -66,13 +85,33 @@ export class AccountingService {
         },
       },
     });
+    if (companyId && ledger.length === 0) {
+      ledger = await prisma.journalEntryLine.findMany({
+        include: {
+          account: true,
+          journalEntry: true,
+        },
+        orderBy: {
+          journalEntry: {
+            date: 'desc',
+          },
+        },
+      });
+    }
+    return ledger;
   }
 
   async getBankAccounts(companyId?: string) {
-    return prisma.bankAccount.findMany({
+    let accounts = await prisma.bankAccount.findMany({
       where: companyId ? { companyId } : {},
       orderBy: { name: 'asc' },
     });
+    if (companyId && accounts.length === 0) {
+      accounts = await prisma.bankAccount.findMany({
+        orderBy: { name: 'asc' },
+      });
+    }
+    return accounts;
   }
 
   async createBankAccount(data: any, companyId?: string) {

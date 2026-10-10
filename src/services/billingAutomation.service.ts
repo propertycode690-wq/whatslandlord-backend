@@ -126,11 +126,18 @@ export async function generateAutoLateFees() {
       });
     });
 
-    // Find all invoices with an unpaid balance
+    // Find all invoices with an unpaid balance and include tenant & unit
     const unpaidInvoices = await prisma.invoice.findMany({
       where: {
         balance: { gt: 0 },
         status: { notIn: ['Paid', 'Cancelled'] },
+      },
+      include: {
+        tenant: {
+          include: {
+            unit: true,
+          },
+        },
       },
     });
 
@@ -144,7 +151,33 @@ export async function generateAutoLateFees() {
         enabled: true,
       };
 
-      if (!companyConfig.enabled) continue;
+      // Resolve unit-wise late fee policy:
+      let unit = inv.tenant?.unit;
+      if (!unit && inv.propertyId && inv.unitNumber) {
+        unit = await prisma.unit.findFirst({
+          where: {
+            propertyId: inv.propertyId,
+            unitNumber: inv.unitNumber,
+          },
+        });
+      }
+
+      let policy = { ...companyConfig };
+      if (unit) {
+        if (unit.isLateFeeEnabled === true) {
+          policy = {
+            enabled: true,
+            graceDays: unit.lateFeeGraceDays ?? companyConfig.graceDays,
+            feeAmount: unit.lateFeeAmount ?? companyConfig.feeAmount,
+            feeType: unit.lateFeeType || companyConfig.feeType,
+          };
+        } else if (unit.isLateFeeEnabled === false) {
+          // Explicitly disabled for this unit
+          policy.enabled = false;
+        }
+      }
+
+      if (!policy.enabled) continue;
 
       // Ensure it is a rent-related invoice
       const lineItemsStr = String(inv.lineItems || '').toLowerCase();
@@ -158,7 +191,7 @@ export async function generateAutoLateFees() {
       const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
 
       // Dynamic grace period check
-      if (diffDays >= companyConfig.graceDays) {
+      if (diffDays >= policy.graceDays) {
         // Mark original invoice as Overdue if status is 'Sent', 'Draft', or 'Pending'
         if (inv.status === 'Sent' || inv.status === 'Draft' || inv.status === 'Pending') {
           await prisma.invoice.update({
@@ -182,13 +215,13 @@ export async function generateAutoLateFees() {
         });
 
         if (!existingLateFee) {
-          let feeVal = companyConfig.feeAmount;
-          if (companyConfig.feeType === 'PERCENTAGE') {
-            feeVal = Math.round((Number(inv.amount || 0) * (companyConfig.feeAmount / 100)) * 100) / 100;
+          let feeVal = policy.feeAmount;
+          if (policy.feeType === 'PERCENTAGE') {
+            feeVal = Math.round((Number(inv.amount || 0) * (policy.feeAmount / 100)) * 100) / 100;
           }
 
           const lineItems = [
-            { description: `Late Fee Charge (${companyConfig.graceDays}-Day Grace Period Exceeded)`, amount: feeVal },
+            { description: `Late Fee Charge (${policy.graceDays}-Day Grace Period Exceeded)`, amount: feeVal },
           ];
 
           await prisma.invoice.create({
@@ -204,12 +237,12 @@ export async function generateAutoLateFees() {
               paidAmount: 0,
               status: 'Sent',
               lineItems: JSON.stringify(lineItems),
-              notes: `Automated $${feeVal} late fee applied after ${companyConfig.graceDays}-day grace period for rent due on ${inv.dueDate} [Ref: ${inv.id}]`,
+              notes: `Automated $${feeVal} late fee applied after ${policy.graceDays}-day grace period for rent due on ${inv.dueDate} [Ref: ${inv.id}]`,
               companyId: inv.companyId,
             },
           });
 
-          console.log(`[Auto-Billing (NY)] Applied $${feeVal} Late Fee after ${companyConfig.graceDays} days for tenant ${inv.tenantName} for overdue rent invoice ${inv.id} due on ${inv.dueDate}`);
+          console.log(`[Auto-Billing (NY)] Applied $${feeVal} Late Fee after ${policy.graceDays} days for tenant ${inv.tenantName} for overdue rent invoice ${inv.id} due on ${inv.dueDate}`);
         }
       }
     }

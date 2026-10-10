@@ -24,6 +24,10 @@ export const createUnitSchema = z.object({
     securityDeposit: safeNumberSchema(z.number().min(0, 'Security deposit cannot be negative')).default(0),
     availabilityDate: safeDateSchema().default(() => new Date()),
     status: unitStatusEnum.default('Vacant'),
+    isLateFeeEnabled: z.boolean().optional().default(false),
+    lateFeeType: z.enum(['FLAT', 'PERCENTAGE']).optional().default('FLAT'),
+    lateFeeAmount: safeNumberSchema(z.number().min(0)).optional().nullable(),
+    lateFeeGraceDays: safeNumberSchema(z.number().int().min(0)).optional().nullable(),
   }),
 });
 
@@ -43,5 +47,9 @@ export const updateUnitSchema = z.object({
     securityDeposit: safeNumberSchema(z.number().min(0, 'Security deposit cannot be negative')).optional(),
     availabilityDate: safeDateSchema().optional(),
     status: unitStatusEnum.optional(),
+    isLateFeeEnabled: z.boolean().optional(),
+    lateFeeType: z.enum(['FLAT', 'PERCENTAGE']).optional(),
+    lateFeeAmount: safeNumberSchema(z.number().min(0)).optional().nullable(),
+    lateFeeGraceDays: safeNumberSchema(z.number().int().min(0)).optional().nullable(),
   }),
 });

@@ -157,6 +157,10 @@ model Unit {
   securityDeposit  Float
   availabilityDate DateTime
   status           UnitStatus    @default(Vacant)
+  isLateFeeEnabled Boolean?      @default(false)
+  lateFeeType      String?       @default("FLAT")
+  lateFeeAmount    Float?
+  lateFeeGraceDays Int?
   leases           Lease[]
   moveIns          MoveIn[]
   moveOuts         MoveOut[]

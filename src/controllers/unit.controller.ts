@@ -61,6 +61,10 @@ export class UnitController {
         securityDeposit,
         availabilityDate,
         status,
+        isLateFeeEnabled,
+        lateFeeType,
+        lateFeeAmount,
+        lateFeeGraceDays,
       } = req.body;
       const companyId = req.user?.companyId;
 
@@ -172,6 +176,10 @@ export class UnitController {
           securityDeposit: parseFloat(securityDeposit || '0'),
           availabilityDate: new Date(availabilityDate || Date.now()),
           status: status || 'Vacant',
+          isLateFeeEnabled: isLateFeeEnabled !== undefined ? Boolean(isLateFeeEnabled) : false,
+          lateFeeType: lateFeeType || 'FLAT',
+          lateFeeAmount: lateFeeAmount !== undefined && lateFeeAmount !== null && lateFeeAmount !== '' ? parseFloat(lateFeeAmount) : null,
+          lateFeeGraceDays: lateFeeGraceDays !== undefined && lateFeeGraceDays !== null && lateFeeGraceDays !== '' ? parseInt(lateFeeGraceDays) : null,
         },
       });
       return sendSuccess({ res, statusCode: 201, data: unit });
@@ -196,6 +204,10 @@ export class UnitController {
         securityDeposit,
         availabilityDate,
         status,
+        isLateFeeEnabled,
+        lateFeeType,
+        lateFeeAmount,
+        lateFeeGraceDays,
       } = req.body;
 
       if (companyId) {
@@ -239,6 +251,10 @@ export class UnitController {
           securityDeposit: securityDeposit !== undefined ? parseFloat(securityDeposit) : undefined,
           availabilityDate: availabilityDate ? new Date(availabilityDate) : undefined,
           status,
+          isLateFeeEnabled: isLateFeeEnabled !== undefined ? Boolean(isLateFeeEnabled) : undefined,
+          lateFeeType: lateFeeType !== undefined ? lateFeeType : undefined,
+          lateFeeAmount: lateFeeAmount !== undefined ? (lateFeeAmount === '' || lateFeeAmount === null ? null : parseFloat(lateFeeAmount)) : undefined,
+          lateFeeGraceDays: lateFeeGraceDays !== undefined ? (lateFeeGraceDays === '' || lateFeeGraceDays === null ? null : parseInt(lateFeeGraceDays)) : undefined,
         },
       });
       return sendSuccess({ res, data: unit });
