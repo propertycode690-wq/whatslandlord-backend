@@ -56,9 +56,24 @@ export class PortalController {
             tenant: true,
           },
         });
+
+        const leaseDocs = await prisma.tenantDocument.findMany({
+          where: {
+            tenantId: tenant.id,
+            category: { in: ['Lease', 'Leasing', 'Rental Agreement'] },
+          },
+          orderBy: { uploadedAt: 'desc' },
+        });
+
+        if (leaseDocs.length > 0) {
+          leases = leases.map((l: any) => ({
+            ...l,
+            documentUrl: leaseDocs[0].fileUrl,
+            documentName: leaseDocs[0].name,
+            leaseDocument: leaseDocs[0],
+          }));
+        }
       }
-
-
 
       return sendSuccess({ res, data: leases });
     } catch (error) {
@@ -78,6 +93,22 @@ export class PortalController {
         });
       }
 
+      let documentUrl: string | null = null;
+      let documentName: string | null = null;
+      if (tenant) {
+        const leaseDoc = await prisma.tenantDocument.findFirst({
+          where: {
+            tenantId: tenant.id,
+            category: { in: ['Lease', 'Leasing', 'Rental Agreement'] },
+          },
+          orderBy: { uploadedAt: 'desc' },
+        });
+        if (leaseDoc) {
+          documentUrl = leaseDoc.fileUrl;
+          documentName = leaseDoc.name;
+        }
+      }
+
       return sendSuccess({
         res,
         data: {
@@ -92,6 +123,8 @@ export class PortalController {
           tenantName: tenant ? `${tenant.firstName} ${tenant.lastName}` : 'Sarah Connor',
           property: lease.property,
           unit: lease.unit,
+          documentUrl,
+          documentName,
           tenant: {
             id: tenant?.id || 't-1',
             firstName: tenant?.firstName || 'Sarah',
