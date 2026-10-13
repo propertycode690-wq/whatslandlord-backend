@@ -240,6 +240,40 @@ Keep the message under 80 words. Include clear call to action to pay via tenant 
       next(error);
     }
   }
+
+  async sendAiReminder(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+    try {
+      const id = req.params.id as string;
+      const { reminderText, tone } = req.body;
+      const invoice = await prisma.invoice.findUnique({
+        where: { id },
+      });
+
+      if (!invoice) throw new Error('Invoice not found.');
+
+      const title = tone === 'urgent' ? '🚨 Urgent Rent Notice' : '📢 AI Rent Payment Reminder';
+      const notification = await prisma.tenantNotification.create({
+        data: {
+          title,
+          message: reminderText || `Your rent payment of $${invoice.balance} for Unit ${invoice.unitNumber} is past due. Please submit payment via tenant portal.`,
+          type: tone === 'urgent' ? 'warning' : 'info',
+          read: false,
+        },
+      });
+
+      return sendSuccess({
+        res,
+        statusCode: 201,
+        data: {
+          success: true,
+          notification,
+          message: 'Notice dispatched to Tenant Portal successfully.',
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
 }
 
 export const invoiceController = new InvoiceController();
