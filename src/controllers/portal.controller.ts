@@ -299,6 +299,27 @@ export class PortalController {
         category = 'Appliance';
       }
 
+      // Auto-detect emergency hazard
+      let computedPriority = priority || 'Normal';
+      if (
+        textToAnalyze.includes('gas') ||
+        textToAnalyze.includes('smoke') ||
+        textToAnalyze.includes('fire') ||
+        textToAnalyze.includes('flood') ||
+        textToAnalyze.includes('spark') ||
+        textToAnalyze.includes('burst pipe') ||
+        textToAnalyze.includes('carbon monoxide')
+      ) {
+        computedPriority = 'Emergency';
+      }
+
+      // AI Estimated Cost benchmark based on category (prevents cost 0)
+      let benchmarkCost = 120;
+      if (category === 'HVAC') benchmarkCost = 220;
+      else if (category === 'Plumbing') benchmarkCost = 150;
+      else if (category === 'Electrical') benchmarkCost = 160;
+      else if (category === 'Appliance') benchmarkCost = 180;
+
       // 2. Auto-find matching vendor for this company & category
       const reqCategoryLower = category.toLowerCase();
       let vendor = await prisma.vendor.findFirst({
@@ -324,7 +345,7 @@ export class PortalController {
           id: `msg-${Date.now()}`,
           senderName: 'WhatsLandlord AI System',
           role: 'System',
-          text: `Ticket automatically categorized as '${category}' and assigned to ${assignedVendorName} (${assignedTechnician}). Contractor notified.`,
+          text: `Ticket automatically categorized as '${category}' with AI estimated cost of $${benchmarkCost}${computedPriority === 'Emergency' ? ' [EMERGENCY HAZARD FLAGGED]' : ''} and assigned to ${assignedVendorName} (${assignedTechnician}). Contractor notified.`,
           timestamp: new Date().toLocaleString(),
         },
       ]);
@@ -333,7 +354,7 @@ export class PortalController {
         data: {
           title: title || `${category} Repair Request`,
           description: description || '',
-          priority: priority || 'Normal',
+          priority: computedPriority,
           status: 'Assigned',
           category: category,
           propertyId: propertyId,
@@ -344,6 +365,8 @@ export class PortalController {
           assignedVendorId: assignedVendorId,
           assignedVendorName: assignedVendorName,
           assignedTechnician: assignedTechnician,
+          estimatedCost: benchmarkCost,
+          cost: benchmarkCost,
           companyId: companyId,
           messages: initialMessage,
         },
