@@ -41,6 +41,29 @@ async function bootstrapDb() {
       });
     }
 
+    // Clean up unwanted seeded mock Chart of Accounts from database
+    const mockCoA = await prisma.coAAccount.findMany({
+      where: {
+        accountName: {
+          in: [
+            'Operating Checking Account',
+            'Security Deposit Escrow Account',
+            'Accounts Payable (AP)',
+            'Tenant Security Deposit Liability',
+            "Owner's Equity Capital",
+            'Rental Revenue Income',
+            'Maintenance & Repair Expense',
+          ],
+        },
+      },
+    });
+    if (mockCoA.length > 0) {
+      const mockIds = mockCoA.map((a) => a.id);
+      await prisma.journalEntryLine.deleteMany({ where: { accountId: { in: mockIds } } });
+      await prisma.coAAccount.deleteMany({ where: { id: { in: mockIds } } });
+      logger.info(`🧹 Cleaned up ${mockCoA.length} seeded mock Chart of Accounts from database.`);
+    }
+
     logger.info('✅ Database schema bootstrap completed.');
   } catch (error) {
     logger.error(error, '❌ Failed to bootstrap database schema:');

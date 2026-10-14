@@ -33,6 +33,9 @@ export class AccountingService {
       const check = await prisma.coAAccount.findFirst({ where: { id, companyId } });
       if (!check) throw new AppError('Account not found.', 404);
     }
+    await prisma.journalEntryLine.deleteMany({
+      where: { accountId: id },
+    });
     return prisma.coAAccount.delete({
       where: { id },
     });
