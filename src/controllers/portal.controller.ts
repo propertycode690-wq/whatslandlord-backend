@@ -298,7 +298,7 @@ export class PortalController {
         status: sr.status || 'Submitted',
         date: sr.createdAt ? new Date(sr.createdAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
         description: sr.description || '',
-        preferredTime: 'Morning (8AM - 12PM)',
+        preferredTime: sr.scheduledDate || (sr.notes?.includes('Preferred Visit:') ? sr.notes.replace('Preferred Visit:', '').trim() : null) || (sr.description?.match(/\[Preferred Visit:\s*([^\]]+)\]/)?.[1]) || 'Morning (8AM - 12PM)',
       }));
 
       return sendSuccess({ res, data: formatted });
@@ -387,6 +387,8 @@ export class PortalController {
         data: {
           title: title || `${category} Repair Request`,
           description: description || '',
+          scheduledDate: preferredTime || null,
+          notes: preferredTime ? `Preferred Visit: ${preferredTime}` : null,
           priority: computedPriority,
           status: 'Assigned',
           category: category,
@@ -2199,6 +2201,8 @@ export class PortalController {
         status: sr.status === 'Open' || sr.status === 'New' || sr.status === 'Submitted' ? 'New' : sr.status === 'InProgress' || sr.status === 'In Progress' ? 'In Progress' : sr.status === 'Completed' ? 'Completed' : sr.status === 'Closed' ? 'Closed' : sr.status === 'Rejected' ? 'Rejected' : sr.status === 'Assigned' ? 'Assigned' : sr.status || 'New',
         assignedTechnician: sr.assignedVendorName || sr.assignedTechnician || (vendor ? (vendor.contactName || vendor.companyName) : 'Maintenance Staff'),
         dueDate: sr.scheduledDate || (sr.createdAt ? new Date(sr.createdAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]),
+        scheduledDate: sr.scheduledDate || null,
+        preferredTime: sr.scheduledDate || (sr.notes?.includes('Preferred Visit:') ? sr.notes.replace('Preferred Visit:', '').trim() : null) || (sr.description?.match(/\[Preferred Visit:\s*([^\]]+)\]/)?.[1]) || null,
         createdAt: sr.createdAt ? new Date(sr.createdAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
         description: sr.description || '',
         estimatedCost: sr.estimatedCost || 0,
@@ -2218,7 +2222,7 @@ export class PortalController {
         issue: wo.title,
         category: wo.title.toLowerCase().includes('hvac') ? 'HVAC' : wo.title.toLowerCase().includes('plumbing') ? 'Plumbing' : 'General',
         priority: wo.priority === 'Normal' ? 'Medium' : wo.priority || 'Medium',
-        status: wo.status === 'Open' || wo.status === 'Submitted' ? 'New' : wo.status === 'InProgress' ? 'In Progress' : wo.status === 'Completed' ? 'Completed' : wo.status === 'Closed' ? 'Closed' : wo.status === 'Rejected' ? 'Rejected' : wo.status === 'Assigned' ? 'Assigned' : wo.status || 'New',
+        status: wo.status === 'Open' || wo.status === 'Submitted' ? 'New' : (wo.status === 'InProgress' || wo.status === 'In Progress' || wo.status === 'In_Progress') ? 'In Progress' : wo.status === 'Completed' ? 'Completed' : wo.status === 'Closed' ? 'Closed' : wo.status === 'Rejected' ? 'Rejected' : wo.status === 'Assigned' ? 'Assigned' : wo.status || 'New',
         assignedTechnician: wo.vendor?.contactName || wo.vendor?.companyName || 'Maintenance Staff',
         dueDate: wo.createdAt ? new Date(wo.createdAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
         createdAt: wo.createdAt ? new Date(wo.createdAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
