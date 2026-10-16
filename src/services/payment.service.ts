@@ -3,57 +3,142 @@ import { authorizeNetService } from './authorizeNet.service';
 import { AppError } from '../utils/appError';
 import { decrypt } from '../utils/crypto';
 import { whatsappService } from './whatsapp.service';
-import crypto from 'crypto';
+import * as crypto from 'crypto';
 
 
 export class PaymentService {
   /**
-   * Get active payment gateway configuration for a specific company
+   * Get active payment gateway configuration for a specific property or company fallback
    */
-  async getActiveGateway(companyId?: string) {
-    if (!companyId) {
-      return { provider: 'MANUAL', options: ['ACH', 'Credit Card', 'Debit Card'] };
+  async getActiveGateway(companyId?: string, propertyId?: string, user?: any) {
+    let resolvedPropertyId = propertyId;
+
+    // If tenant user and propertyId not specified, resolve from tenant's assigned property
+    if (!resolvedPropertyId && (user?.roleName === 'Tenant' || user?.role === 'Tenant') && user?.email) {
+      try {
+        const tenant = await prisma.tenant.findFirst({
+          where: { email: user.email },
+          include: { unit: true },
+        });
+        if ((tenant as any)?.propertyId) {
+          resolvedPropertyId = (tenant as any).propertyId;
+        } else if (tenant?.unit?.propertyId) {
+          resolvedPropertyId = tenant.unit.propertyId;
+        }
+      } catch (err) {
+        console.error('Failed to auto-resolve tenant property for gateway:', err);
+      }
     }
 
-    const integrations = await prisma.companyIntegration.findMany({
-      where: { companyId, status: 'Active' },
-    });
+    // 1. Property-specific Gateway (1st Priority)
+    if (resolvedPropertyId) {
+      const property: any = await prisma.property.findUnique({
+        where: { id: resolvedPropertyId },
+      });
 
-    const razorpay = integrations.find((i) => i.provider === 'RAZORPAY');
-    if (razorpay && razorpay.accountSid) {
-      return {
-        provider: 'RAZORPAY',
-        keyId: razorpay.accountSid,
-      };
+      if (
+        property &&
+        property.paymentProvider &&
+        property.paymentProvider !== 'COMPANY_DEFAULT' &&
+        property.paymentStatus === 'Active' &&
+        property.paymentAccountId
+      ) {
+        if (property.paymentProvider === 'RAZORPAY') {
+          return {
+            provider: 'RAZORPAY',
+            keyId: property.paymentAccountId,
+            source: 'PROPERTY',
+            propertyId: property.id,
+            propertyName: property.name,
+          };
+        }
+        if (property.paymentProvider === 'STRIPE') {
+          return {
+            provider: 'STRIPE',
+            publishableKey: property.paymentAccountId,
+            source: 'PROPERTY',
+            propertyId: property.id,
+            propertyName: property.name,
+          };
+        }
+        if (property.paymentProvider === 'AUTHORIZE_NET') {
+          return {
+            provider: 'AUTHORIZE_NET',
+            apiLoginId: property.paymentAccountId,
+            source: 'PROPERTY',
+            propertyId: property.id,
+            propertyName: property.name,
+          };
+        }
+      }
     }
 
-    const stripe = integrations.find((i) => i.provider === 'STRIPE');
-    if (stripe && stripe.accountSid) {
-      return {
-        provider: 'STRIPE',
-        publishableKey: stripe.accountSid,
-      };
+    // 2. Company-level Gateway (Option 2 Fallback)
+    if (companyId) {
+      const integrations = await prisma.companyIntegration.findMany({
+        where: { companyId, status: 'Active' },
+      });
+
+      const razorpay = integrations.find((i: any) => i.provider === 'RAZORPAY');
+      if (razorpay && razorpay.accountSid) {
+        return {
+          provider: 'RAZORPAY',
+          keyId: razorpay.accountSid,
+          source: 'COMPANY',
+        };
+      }
+
+      const stripe = integrations.find((i: any) => i.provider === 'STRIPE');
+      if (stripe && stripe.accountSid) {
+        return {
+          provider: 'STRIPE',
+          publishableKey: stripe.accountSid,
+          source: 'COMPANY',
+        };
+      }
+
+      const authorizeNet = integrations.find((i: any) => i.provider === 'AUTHORIZE_NET');
+      if (authorizeNet && authorizeNet.accountSid) {
+        return {
+          provider: 'AUTHORIZE_NET',
+          apiLoginId: authorizeNet.accountSid,
+          source: 'COMPANY',
+        };
+      }
     }
 
-    const authorizeNet = integrations.find((i) => i.provider === 'AUTHORIZE_NET');
-    if (authorizeNet && authorizeNet.accountSid) {
-      return {
-        provider: 'AUTHORIZE_NET',
-        apiLoginId: authorizeNet.accountSid,
-      };
-    }
-
-    return { provider: 'MANUAL', options: ['ACH', 'Credit Card', 'Debit Card'] };
+    return { provider: 'MANUAL', options: ['ACH', 'Credit Card', 'Debit Card'], source: 'DEFAULT' };
   }
 
   /**
-   * Create Razorpay Order via live Razorpay API
+   * Create Razorpay Order via live Razorpay API (with property credentials or company fallback)
    */
-  async createRazorpayOrder(amount: number, currency: string = 'USD', companyId?: string) {
+  async createRazorpayOrder(amount: number, currency: string = 'USD', companyId?: string, propertyId?: string) {
     let keyId = process.env.RAZORPAY_KEY_ID || '';
     let keySecret = process.env.RAZORPAY_KEY_SECRET || '';
 
-    if (companyId) {
+    // Check Property first
+    if (propertyId) {
+      const prop: any = await prisma.property.findUnique({ where: { id: propertyId } });
+      if (
+        prop &&
+        prop.paymentProvider === 'RAZORPAY' &&
+        prop.paymentStatus === 'Active' &&
+        prop.paymentAccountId &&
+        prop.encryptedPaymentToken &&
+        prop.paymentTokenIv
+      ) {
+        keyId = prop.paymentAccountId;
+        try {
+          keySecret = decrypt(prop.encryptedPaymentToken, prop.paymentTokenIv);
+        } catch (e) {
+          console.error('Failed to decrypt Property Razorpay Secret', e);
+        }
+      }
+    }
+
+    // Fallback to Company Integration
+    if ((!keyId || !keySecret) && companyId) {
       const integration = await prisma.companyIntegration.findFirst({
         where: { companyId, provider: 'RAZORPAY', status: 'Active' },
       });
@@ -68,7 +153,7 @@ export class PaymentService {
     }
 
     if (!keyId || !keySecret) {
-      throw new AppError('Razorpay credentials not configured for this company.', 400, 'GATEWAY_ERROR');
+      throw new AppError('Razorpay credentials not configured for this property or company.', 400, 'GATEWAY_ERROR');
     }
 
     const amountInPaise = Math.round(amount * 100);
@@ -110,12 +195,32 @@ export class PaymentService {
     razorpaySignature: string;
     amount: number;
     companyId?: string;
+    propertyId?: string;
     userEmail?: string;
     userRole?: string;
   }) {
     let keySecret = process.env.RAZORPAY_KEY_SECRET || '';
 
-    if (data.companyId) {
+    // Check Property first
+    if (data.propertyId) {
+      const prop: any = await prisma.property.findUnique({ where: { id: data.propertyId } });
+      if (
+        prop &&
+        prop.paymentProvider === 'RAZORPAY' &&
+        prop.paymentStatus === 'Active' &&
+        prop.encryptedPaymentToken &&
+        prop.paymentTokenIv
+      ) {
+        try {
+          keySecret = decrypt(prop.encryptedPaymentToken, prop.paymentTokenIv);
+        } catch (e) {
+          console.error('Failed to decrypt Property Razorpay Secret for verification', e);
+        }
+      }
+    }
+
+    // Fallback to Company
+    if (!keySecret && data.companyId) {
       const integration = await prisma.companyIntegration.findFirst({
         where: { companyId: data.companyId, provider: 'RAZORPAY', status: 'Active' },
       });
@@ -285,7 +390,7 @@ export class PaymentService {
 
     const refNum = data.referenceNumber || `REF-${Date.now()}`;
 
-    return prisma.$transaction(async (tx) => {
+    return prisma.$transaction(async (tx: any) => {
       const existingPayment = await tx.rentPayment.findFirst({
         where: { referenceNumber: refNum },
       });
@@ -350,7 +455,7 @@ export class PaymentService {
           companyId: payment.companyId,
           to: tenant.phone,
           message: `Hello ${tenant.firstName}, your payment of $${payment.amount.toLocaleString()} has been received and processed. Reference ID: ${payment.referenceNumber}. Thank you!`,
-        }).catch((err) => console.error('WhatsApp dispatch warning:', err));
+        }).catch((err: any) => console.error('WhatsApp dispatch warning:', err));
       }
 
 
@@ -468,7 +573,7 @@ export class PaymentService {
     if (data.referenceNumber !== undefined) updateData.referenceNumber = data.referenceNumber;
     if (data.status !== undefined) updateData.status = data.status;
 
-    return prisma.$transaction(async (tx) => {
+    return prisma.$transaction(async (tx: any) => {
       if (data.amount !== undefined && Number(data.amount) !== existingPayment.amount) {
         const diff = Number(data.amount) - existingPayment.amount;
 
@@ -543,7 +648,7 @@ export class PaymentService {
       throw new AppError('Payment record not found.', 404, 'NOT_FOUND');
     }
 
-    return prisma.$transaction(async (tx) => {
+    return prisma.$transaction(async (tx: any) => {
       const tenantInvoices = await tx.invoice.findMany({
         where: { tenantId: payment.tenantId },
         orderBy: { dueDate: 'desc' },

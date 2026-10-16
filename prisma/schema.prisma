@@ -117,6 +117,14 @@ model Property {
   companyId           String?
   nycBin              String?
   imageUrl            String?       @db.Text
+
+  // Property-Wise Payment Integration
+  paymentProvider       String?       @default("COMPANY_DEFAULT")
+  paymentAccountId      String?
+  encryptedPaymentToken String?       @db.Text
+  paymentTokenIv        String?
+  paymentStatus         String?       @default("Active")
+
   buildings           Building[]
   leases              Lease[]
   company             Company?      @relation(fields: [companyId], references: [id])

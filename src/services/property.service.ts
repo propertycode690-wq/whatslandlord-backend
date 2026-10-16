@@ -2,6 +2,7 @@ import prisma from '../config/database';
 import { AppError } from '../utils/appError';
 import cloudinary from '../config/cloudinary';
 import { getManagerCompanyId } from '../utils/companyHelper';
+import { encrypt } from '../utils/crypto';
 
 export class PropertyService {
   async getAllProperties(companyId?: string, user?: any) {
@@ -18,7 +19,7 @@ export class PropertyService {
       }
     }
 
-    return prisma.property.findMany({
+    const properties = await prisma.property.findMany({
       where: whereClause,
       include: {
         owner: true,
@@ -26,10 +27,17 @@ export class PropertyService {
         units: true,
       },
     });
+
+    return properties.map((p: any) => ({
+      ...p,
+      hasPaymentToken: !!p.encryptedPaymentToken,
+      encryptedPaymentToken: undefined,
+      paymentTokenIv: undefined,
+    }));
   }
 
   async getPropertyById(id: string, companyId?: string) {
-    const prop = await prisma.property.findFirst({
+    const prop: any = await prisma.property.findFirst({
       where: companyId ? { id, companyId } : { id },
       include: {
         owner: true,
@@ -38,7 +46,13 @@ export class PropertyService {
       },
     });
     if (!prop) throw new AppError('Property not found.', 404, 'NOT_FOUND');
-    return prop;
+
+    return {
+      ...prop,
+      hasPaymentToken: !!prop.encryptedPaymentToken,
+      encryptedPaymentToken: undefined,
+      paymentTokenIv: undefined,
+    };
   }
 
   async createProperty(data: any, file?: any) {
@@ -127,6 +141,24 @@ export class PropertyService {
       }
     }
 
+    let paymentProvider = data.paymentProvider || 'COMPANY_DEFAULT';
+    let paymentAccountId = data.paymentAccountId || null;
+    let encryptedPaymentToken: string | null = null;
+    let paymentTokenIv: string | null = null;
+    let paymentStatus = data.paymentStatus || 'Active';
+
+    if (paymentProvider && paymentProvider !== 'COMPANY_DEFAULT' && data.paymentAuthToken) {
+      try {
+        const encrypted = encrypt(data.paymentAuthToken);
+        encryptedPaymentToken = encrypted.encryptedText;
+        paymentTokenIv = encrypted.iv;
+      } catch (e) {
+        console.error('Failed to encrypt property payment token', e);
+      }
+    } else if (paymentProvider === 'COMPANY_DEFAULT') {
+      paymentAccountId = null;
+    }
+
     const createdProp = await prisma.property.create({
       data: {
         name: data.name,
@@ -147,6 +179,11 @@ export class PropertyService {
         imageUrl: imageUrl,
         companyId: data.companyId,
         nycBin: data.nycBin || data.bin || null,
+        paymentProvider,
+        paymentAccountId,
+        encryptedPaymentToken,
+        paymentTokenIv,
+        paymentStatus,
       },
     });
 
@@ -243,6 +280,26 @@ export class PropertyService {
 
     const binVal = data.nycBin !== undefined ? data.nycBin : (data.bin !== undefined ? data.bin : prop.nycBin);
 
+    let paymentProvider = data.paymentProvider !== undefined ? data.paymentProvider : prop.paymentProvider;
+    let paymentAccountId = data.paymentAccountId !== undefined ? data.paymentAccountId : prop.paymentAccountId;
+    let paymentStatus = data.paymentStatus !== undefined ? data.paymentStatus : (prop.paymentStatus || 'Active');
+    let encryptedPaymentToken = prop.encryptedPaymentToken;
+    let paymentTokenIv = prop.paymentTokenIv;
+
+    if (paymentProvider === 'COMPANY_DEFAULT') {
+      paymentAccountId = null;
+      encryptedPaymentToken = null;
+      paymentTokenIv = null;
+    } else if (data.paymentAuthToken) {
+      try {
+        const encrypted = encrypt(data.paymentAuthToken);
+        encryptedPaymentToken = encrypted.encryptedText;
+        paymentTokenIv = encrypted.iv;
+      } catch (e) {
+        console.error('Failed to encrypt property payment token', e);
+      }
+    }
+
     const updatedProp = await prisma.property.update({
       where: { id },
       data: {
@@ -263,6 +320,11 @@ export class PropertyService {
         currentValue: data.currentValue !== undefined ? Number(data.currentValue) : prop.currentValue,
         nycBin: binVal,
         imageUrl: imageUrl,
+        paymentProvider,
+        paymentAccountId,
+        encryptedPaymentToken,
+        paymentTokenIv,
+        paymentStatus,
       },
     });
 

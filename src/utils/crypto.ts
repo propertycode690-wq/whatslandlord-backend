@@ -1,4 +1,4 @@
-import crypto from 'crypto';
+import * as crypto from 'crypto';
 
 const ALGORITHM = 'aes-256-gcm';
 const ENCRYPTION_KEY = process.env.INTEGRATION_ENCRYPTION_KEY || 'wLandlord_sec_encrypt_key_32_chr'; // fallback if not loaded
