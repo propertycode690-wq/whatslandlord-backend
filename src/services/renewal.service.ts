@@ -1,5 +1,4 @@
 import prisma from '../config/database';
-import { RenewalStatus, LeaseStatus } from '@prisma/client';
 import { moveOutService } from './moveOut.service';
 
 export class RenewalService {
@@ -8,12 +7,11 @@ export class RenewalService {
     const sixtyDaysFromNow = new Date();
     sixtyDaysFromNow.setDate(now.getDate() + 60);
 
-    // Find all active leases expiring within 60 days
+    // Find all active leases expiring within 60 days (including expired active leases requiring renewal)
     const activeLeases = await prisma.lease.findMany({
       where: {
         status: 'Active',
         endDate: {
-          gte: now,
           lte: sixtyDaysFromNow,
         },
       },
@@ -27,7 +25,7 @@ export class RenewalService {
       if (!existingRenewal) {
         // Rent stays identical (no increase)
         const newRentAmount = lease.rentAmount;
-        
+
         // Calculate 12-month extension by default
         const newEndDate = new Date(lease.endDate);
         newEndDate.setMonth(newEndDate.getMonth() + 12);
@@ -45,12 +43,36 @@ export class RenewalService {
     }
   }
 
+  async ensureRenewalExists(leaseId: string) {
+    let renewal = await prisma.leaseRenewal.findUnique({
+      where: { leaseId },
+      include: { lease: true },
+    });
+    if (!renewal) {
+      const lease = await prisma.lease.findUnique({ where: { id: leaseId } });
+      if (!lease) throw new Error('Lease not found.');
+      const newEndDate = new Date(lease.endDate);
+      newEndDate.setMonth(newEndDate.getMonth() + 12);
+      renewal = await prisma.leaseRenewal.create({
+        data: {
+          leaseId: lease.id,
+          newRentAmount: lease.rentAmount,
+          newEndDate,
+          termMonths: 12,
+          status: 'PENDING',
+        },
+        include: { lease: true },
+      });
+    }
+    return renewal;
+  }
+
   async getAllRenewals(companyId?: string) {
     try {
       // Auto-trigger renewal detection on fetch
       await this.autoCreatePendingRenewals();
     } catch (e) {
-      console.error('Error auto-creating pending renewals:', e);
+      (globalThis as any).console?.error('Error auto-creating pending renewals:', e);
     }
 
     return prisma.leaseRenewal.findMany({
@@ -69,11 +91,7 @@ export class RenewalService {
   }
 
   async sendOffer(leaseId: string) {
-    const renewal = await prisma.leaseRenewal.findUnique({
-      where: { leaseId },
-    });
-    if (!renewal) throw new Error('Renewal record not found.');
-
+    const renewal = await this.ensureRenewalExists(leaseId);
     return prisma.leaseRenewal.update({
       where: { leaseId },
       data: { status: 'OFFER_SENT' },
@@ -81,11 +99,7 @@ export class RenewalService {
   }
 
   async updateRenewal(leaseId: string, data: { newRentAmount?: number; termMonths?: number; newEndDate?: string }) {
-    const renewal = await prisma.leaseRenewal.findUnique({
-      where: { leaseId },
-      include: { lease: true },
-    });
-    if (!renewal) throw new Error('Renewal record not found.');
+    const renewal = await this.ensureRenewalExists(leaseId);
 
     const newRentAmount = data.newRentAmount !== undefined ? parseFloat(data.newRentAmount as any) : renewal.newRentAmount;
     const termMonths = data.termMonths !== undefined ? parseInt(data.termMonths as any) : renewal.termMonths;
@@ -93,7 +107,7 @@ export class RenewalService {
     let computedEndDate = renewal.newEndDate;
     if (data.newEndDate) {
       computedEndDate = new Date(data.newEndDate);
-    } else if (data.termMonths !== undefined) {
+    } else if (data.termMonths !== undefined && renewal.lease) {
       computedEndDate = new Date(renewal.lease.endDate);
       computedEndDate.setMonth(computedEndDate.getMonth() + termMonths);
     }
@@ -109,6 +123,7 @@ export class RenewalService {
   }
 
   async acceptRenewal(leaseId: string, companyId?: string, termMonths?: number) {
+    await this.ensureRenewalExists(leaseId);
     const renewal = await prisma.leaseRenewal.findFirst({
       where: {
         leaseId,
@@ -119,7 +134,7 @@ export class RenewalService {
     if (!renewal) throw new Error('Renewal record not found.');
     if (renewal.status === 'ACCEPTED') throw new Error('Renewal already accepted.');
 
-    return prisma.$transaction(async (tx) => {
+    return prisma.$transaction(async (tx: any) => {
       // 1. Update status to ACCEPTED
       const updatedRenewal = await tx.leaseRenewal.update({
         where: { leaseId },
@@ -158,6 +173,7 @@ export class RenewalService {
   }
 
   async rejectRenewal(leaseId: string, companyId?: string) {
+    await this.ensureRenewalExists(leaseId);
     const renewal = await prisma.leaseRenewal.findFirst({
       where: {
         leaseId,
@@ -168,7 +184,7 @@ export class RenewalService {
     if (!renewal) throw new Error('Renewal record not found.');
     if (renewal.status === 'REJECTED') throw new Error('Renewal already rejected.');
 
-    return prisma.$transaction(async (tx) => {
+    return prisma.$transaction(async (tx: any) => {
       // 1. Update status to REJECTED
       const updated = await tx.leaseRenewal.update({
         where: { leaseId },
