@@ -26,6 +26,7 @@ import documentRoutes from './document.routes';
 import reportRoutes from '../reports/routes/report.routes';
 import integrationRoutes from './integration.routes';
 import companyRoutes from './company.routes';
+import restoreBinRoutes from './restoreBin.routes';
 import { authMiddleware } from '../middlewares/auth.middleware';
 import { superAdminController } from '../controllers/superadmin.controller';
 
@@ -83,6 +84,7 @@ router.use('/inspections', authMiddleware, inspectionRoutes);
 router.use('/documents', authMiddleware, documentRoutes);
 router.use('/reports', authMiddleware, reportRoutes);
 router.use('/integrations', authMiddleware, integrationRoutes);
+router.use('/restore-bin', authMiddleware, restoreBinRoutes);
 router.use('/', authMiddleware, secondaryRoutes);
 
 export default router;

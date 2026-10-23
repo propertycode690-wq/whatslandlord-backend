@@ -41,6 +41,26 @@ async function bootstrapDb() {
       });
     }
 
+    // Ensure restore_bin table exists
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS restore_bin (
+        id VARCHAR(191) PRIMARY KEY,
+        entityType VARCHAR(100) NOT NULL,
+        entityId VARCHAR(191) NOT NULL,
+        title VARCHAR(255) NOT NULL,
+        subtitle VARCHAR(255) NULL,
+        data LONGTEXT NOT NULL,
+        deletedBy VARCHAR(191) NULL,
+        companyId VARCHAR(191) NULL,
+        createdAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+        deletedAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+        INDEX idx_rb_company (companyId),
+        INDEX idx_rb_entity (entityType, entityId)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `).catch((e: any) => {
+      logger.warn(`restore_bin table init warning: ${e.message}`);
+    });
+
     // Clean up unwanted seeded mock Chart of Accounts from database
     const mockCoA = await prisma.coAAccount.findMany({
       where: {
@@ -62,6 +82,22 @@ async function bootstrapDb() {
       await prisma.journalEntryLine.deleteMany({ where: { accountId: { in: mockIds } } });
       await prisma.coAAccount.deleteMany({ where: { id: { in: mockIds } } });
       logger.info(`🧹 Cleaned up ${mockCoA.length} seeded mock Chart of Accounts from database.`);
+    }
+
+    const existingRohit = await prisma.owner.findFirst({ where: { email: 'rohit@example.com' } });
+    if (!existingRohit) {
+      const firstCompany = await prisma.company.findFirst();
+      await prisma.owner.create({
+        data: {
+          id: '584ff4e1-7950-4d89-9884-2a62372fbfb0',
+          name: 'rohit',
+          email: 'rohit@example.com',
+          phone: '1223345343',
+          payoutMethod: 'Check',
+          companyId: firstCompany?.id || null,
+        },
+      }).catch(() => {});
+      logger.info('✅ Restored owner rohit into database.');
     }
 
     logger.info('✅ Database schema bootstrap completed.');

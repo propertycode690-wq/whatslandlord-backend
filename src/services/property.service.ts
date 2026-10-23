@@ -350,6 +350,30 @@ export class PropertyService {
 
     return updatedProp;
   }
+
+  async deleteProperty(id: string, companyId?: string, permanent = false) {
+    const where: any = { id };
+    if (companyId) where.companyId = companyId;
+    const prop = await prisma.property.findFirst({ where });
+    if (!prop) {
+      throw new AppError('Property not found', 404, 'NOT_FOUND');
+    }
+
+    if (!permanent) {
+      // Soft-delete: update status to Deleted
+      return await prisma.property.update({
+        where: { id },
+        data: { status: 'Deleted' },
+      });
+    }
+
+    // Permanent delete
+    return await prisma.$transaction(async (tx) => {
+      await tx.unit.deleteMany({ where: { propertyId: id } });
+      await tx.building.deleteMany({ where: { propertyId: id } });
+      return await tx.property.delete({ where: { id } });
+    });
+  }
 }
 
 export const propertyService = new PropertyService();
