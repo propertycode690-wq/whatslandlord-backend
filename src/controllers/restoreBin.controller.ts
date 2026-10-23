@@ -117,7 +117,12 @@ export class RestoreBinController {
       }
 
       const id = uuidv4();
-      const userIdentifier = deletedBy || (req.user ? `${req.user.firstName || ''} ${req.user.lastName || ''}`.trim() : 'Property Manager') || req.user?.email || 'Property Manager';
+      const userObj = req.user as any;
+      const userIdentifier =
+        deletedBy ||
+        (userObj ? `${userObj.firstName || ''} ${userObj.lastName || ''}`.trim() : '') ||
+        req.user?.email ||
+        'Property Manager';
       const serializedData = typeof data === 'string' ? data : JSON.stringify(data || {});
       const now = new Date();
 
@@ -146,17 +151,17 @@ export class RestoreBinController {
         } else if (entityType === 'Unit') {
           await prisma.unit.update({
             where: { id: entityId },
-            data: { status: 'Inactive' },
+            data: { status: 'UnderMaintenance' as any },
           }).catch(() => {});
         } else if (entityType === 'Tenant') {
           await prisma.tenant.update({
             where: { id: entityId },
-            data: { status: 'Inactive' },
+            data: { status: 'Inactive' as any },
           }).catch(() => {});
         } else if (entityType === 'Lease') {
           await prisma.lease.update({
             where: { id: entityId },
-            data: { status: 'Terminated' },
+            data: { status: 'Terminated' as any },
           }).catch(() => {});
         }
       } catch (e) {
@@ -222,7 +227,7 @@ export class RestoreBinController {
         if (existing) {
           await prisma.unit.update({
             where: { id: entityId },
-            data: { status: entityData.status && entityData.status !== 'Inactive' ? entityData.status : 'Vacant' },
+            data: { status: (entityData.status && entityData.status !== 'Inactive' ? entityData.status : 'Vacant') as any },
           });
         }
       } else if (entityType === 'Tenant') {
@@ -230,7 +235,7 @@ export class RestoreBinController {
         if (existing) {
           await prisma.tenant.update({
             where: { id: entityId },
-            data: { status: entityData.status && entityData.status !== 'Inactive' ? entityData.status : 'Active' },
+            data: { status: (entityData.status && entityData.status !== 'Inactive' ? entityData.status : 'Active') as any },
           });
         }
       } else if (entityType === 'Lease') {
@@ -238,7 +243,7 @@ export class RestoreBinController {
         if (existing) {
           await prisma.lease.update({
             where: { id: entityId },
-            data: { status: entityData.status && entityData.status !== 'Terminated' ? entityData.status : 'Active' },
+            data: { status: (entityData.status && entityData.status !== 'Terminated' ? entityData.status : 'Active') as any },
           });
         }
       } else if (entityType === 'Owner') {
@@ -264,7 +269,7 @@ export class RestoreBinController {
         if (existing) {
           await prisma.serviceRequest.update({
             where: { id: entityId },
-            data: { status: 'New' },
+            data: { status: 'New' as any },
           }).catch(() => {});
         }
       } else if (entityType === 'WorkOrder') {
@@ -272,7 +277,7 @@ export class RestoreBinController {
         if (existing) {
           await prisma.workOrder.update({
             where: { id: entityId },
-            data: { status: 'Open' },
+            data: { status: 'Open' as any },
           }).catch(() => {});
         }
       }
