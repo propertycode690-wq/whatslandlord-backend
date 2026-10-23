@@ -11,23 +11,34 @@ export class DashboardController {
       const totalProperties = await prisma.property.count({
         where: {
           ...(companyId ? { companyId } : {}),
-          status: { notIn: ['Inactive', 'Draft'] },
+          status: { notIn: ['Inactive', 'Draft', 'Deleted'] },
         },
       });
       const rawTotalUnits = await prisma.unit.count({
-        where: companyId ? { property: { companyId } } : {},
+        where: {
+          property: {
+            status: { notIn: ['Inactive', 'Deleted'] },
+            ...(companyId ? { companyId } : {}),
+          },
+        },
       });
       
       const occupiedUnits = await prisma.unit.count({
         where: {
           status: 'Occupied',
-          ...(companyId ? { property: { companyId } } : {}),
+          property: {
+            status: { notIn: ['Inactive', 'Deleted'] },
+            ...(companyId ? { companyId } : {}),
+          },
         },
       });
       const vacantUnits = await prisma.unit.count({
         where: {
           status: 'Vacant',
-          ...(companyId ? { property: { companyId } } : {}),
+          property: {
+            status: { notIn: ['Inactive', 'Deleted'] },
+            ...(companyId ? { companyId } : {}),
+          },
         },
       });
 

@@ -8,11 +8,12 @@ export class BuildingController {
     try {
       const companyId = req.user?.companyId;
       const buildings = await prisma.building.findMany({
-        where: companyId ? {
+        where: {
           property: {
-            companyId: companyId
-          }
-        } : {},
+            status: { notIn: ['Inactive', 'Deleted'] },
+            ...(companyId ? { companyId } : {}),
+          },
+        },
         include: {
           property: true,
           units: true,

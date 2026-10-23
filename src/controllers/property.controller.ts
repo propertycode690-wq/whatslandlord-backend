@@ -41,8 +41,9 @@ export class PropertyController {
     try {
       const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
       const companyId = req.user?.companyId;
-      await propertyService.deleteProperty(id, companyId);
-      return sendSuccess({ res, message: 'Property deleted successfully' });
+      const permanent = req.query.permanent === 'true' || req.body?.permanent === true;
+      await propertyService.deleteProperty(id, companyId, permanent);
+      return sendSuccess({ res, message: permanent ? 'Property permanently deleted successfully' : 'Property deleted successfully' });
     } catch (error) {
       next(error);
     }
