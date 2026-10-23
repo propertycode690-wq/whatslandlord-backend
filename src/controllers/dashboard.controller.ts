@@ -14,8 +14,8 @@ export class DashboardController {
           status: { notIn: ['Inactive', 'Draft'] },
         },
       });
-      const totalUnits = await prisma.unit.count({
-        where: companyId ? { property: { companyId, status: { notIn: ['Inactive', 'Draft'] } } } : {},
+      const rawTotalUnits = await prisma.unit.count({
+        where: companyId ? { property: { companyId } } : {},
       });
       
       const occupiedUnits = await prisma.unit.count({
@@ -31,7 +31,8 @@ export class DashboardController {
         },
       });
 
-      const occupancyRate = totalUnits > 0 ? Math.round((occupiedUnits / totalUnits) * 100) : 0;
+      const totalUnits = Math.max(rawTotalUnits, occupiedUnits + vacantUnits);
+      const occupancyRate = totalUnits > 0 ? Math.min(100, Math.round((occupiedUnits / totalUnits) * 100)) : 0;
 
       // Sum rentAmount for active leases
       const activeLeases = await prisma.lease.findMany({
@@ -55,20 +56,29 @@ export class DashboardController {
       const dbExpenses = await prisma.expense.findMany({});
       const totalExpenses = dbExpenses.reduce((sum: number, e: any) => sum + (e.amount || 0), 0);
 
-      // Open maintenance orders
-      const openMaintenance = await prisma.workOrder.count({
+      // Open maintenance orders (both WorkOrders and ServiceRequests)
+      const openWorkOrders = await prisma.workOrder.count({
         where: {
           status: { in: ['Open', 'InProgress'] },
           ...(companyId ? { companyId } : {}),
         },
       });
 
+      const openServiceRequests = await prisma.serviceRequest.count({
+        where: {
+          status: { in: ['Open', 'InProgress', 'In Progress', 'Pending', 'New', 'Submitted', 'Assigned'] },
+          ...(companyId ? { companyId } : {}),
+        },
+      });
+
+      const openMaintenance = openWorkOrders + openServiceRequests;
+
       const leasesExpiringSoon = await prisma.lease.count({
         where: {
           status: 'Active',
           ...(companyId ? { companyId } : {}),
           endDate: {
-            lte: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // Next 30 days
+            lte: new Date(Date.now() + 60 * 24 * 60 * 60 * 1000), // Next 60 days
           },
         },
       });
