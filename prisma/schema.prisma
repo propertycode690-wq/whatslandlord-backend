@@ -1336,3 +1336,21 @@ model CompanyIntegration {
   @@map("company_integrations")
 }
 
+model RestoreBin {
+  id         String   @id @default(uuid())
+  entityType String   @db.VarChar(100)
+  entityId   String   @db.VarChar(191)
+  title      String   @db.VarChar(255)
+  subtitle   String?  @db.VarChar(255)
+  data       String   @db.LongText
+  deletedBy  String?  @db.VarChar(191)
+  companyId  String?  @db.VarChar(191)
+  createdAt  DateTime @default(now())
+  deletedAt  DateTime @default(now())
+
+  @@index([companyId], map: "idx_rb_company")
+  @@index([entityType, entityId], map: "idx_rb_entity")
+  @@map("restore_bin")
+}
+
+
