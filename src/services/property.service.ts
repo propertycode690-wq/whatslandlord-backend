@@ -6,7 +6,7 @@ import { encrypt } from '../utils/crypto';
 
 export class PropertyService {
   async getAllProperties(companyId?: string, user?: any) {
-    let whereClause: any = companyId ? { companyId, status: { not: 'Inactive' } } : { status: { not: 'Inactive' } };
+    let whereClause: any = companyId ? { companyId, status: { notIn: ['Inactive', 'Deleted'] } } : { status: { notIn: ['Inactive', 'Deleted'] } };
 
     if ((user?.roleName === 'Owner' || user?.role === 'Owner') && user?.email) {
       const owner = await prisma.owner.findFirst({
@@ -62,7 +62,7 @@ export class PropertyService {
       const company = await prisma.company.findUnique({ where: { id: companyId } });
       if (company) {
         const currentCount = await prisma.property.count({
-          where: { companyId, status: { not: 'Inactive' } },
+          where: { companyId, status: { notIn: ['Inactive', 'Deleted'] } },
         });
         const maxLimit = company.maxProperties || 50;
         if (currentCount >= maxLimit) {
@@ -204,28 +204,6 @@ export class PropertyService {
     return createdProp;
   }
 
-  async deleteProperty(id: string, companyId?: string) {
-    if (companyId) {
-      const prop = await prisma.property.findFirst({
-        where: { id, companyId },
-      });
-      if (!prop) throw new AppError('Property not found.', 404, 'NOT_FOUND');
-    }
-
-    // Auto-delete associated buildings when property is deleted
-    try {
-      await prisma.building.deleteMany({
-        where: { propertyId: id },
-      });
-    } catch (err) {
-      console.error('Failed to auto-delete buildings for property:', err);
-    }
-
-    return prisma.property.update({
-      where: { id },
-      data: { status: 'Inactive' },
-    });
-  }
 
   async updateProperty(id: string, data: any, file?: any, companyId?: string) {
     const prop = await prisma.property.findFirst({
@@ -360,7 +338,7 @@ export class PropertyService {
     }
 
     if (!permanent) {
-      // Soft-delete: update status to Deleted
+      // Soft-delete: update status to Deleted without removing database records
       return await prisma.property.update({
         where: { id },
         data: { status: 'Deleted' },
@@ -369,6 +347,9 @@ export class PropertyService {
 
     // Permanent delete
     return await prisma.$transaction(async (tx) => {
+      await tx.rentPayment.deleteMany({ where: { propertyId: id } });
+      await tx.lease.deleteMany({ where: { propertyId: id } });
+      await tx.workOrder.deleteMany({ where: { propertyId: id } });
       await tx.unit.deleteMany({ where: { propertyId: id } });
       await tx.building.deleteMany({ where: { propertyId: id } });
       return await tx.property.delete({ where: { id } });
