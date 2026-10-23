@@ -4,6 +4,7 @@ import { sendSuccess } from '../utils/apiResponse';
 import { AuthenticatedRequest } from '../middlewares/auth.middleware';
 import { generateAutoInvoices, generateAutoLateFees } from '../services/billingAutomation.service';
 import { env } from '../config/env';
+import { createNotification } from '../services/notification.helper';
 
 class InvoiceController {
   async getAll(req: AuthenticatedRequest, res: Response, next: NextFunction) {
@@ -252,13 +253,25 @@ Keep the message under 80 words. Include clear call to action to pay via tenant 
       if (!invoice) throw new Error('Invoice not found.');
 
       const title = tone === 'urgent' ? '🚨 Urgent Rent Notice' : '📢 AI Rent Payment Reminder';
-      const notification = await prisma.tenantNotification.create({
-        data: {
-          title,
-          message: reminderText || `Your rent payment of $${invoice.balance} for Unit ${invoice.unitNumber} is past due. Please submit payment via tenant portal.`,
-          type: tone === 'urgent' ? 'warning' : 'info',
-          read: false,
-        },
+      const notifMsg = reminderText || `Your rent payment of $${invoice.balance} for Unit ${invoice.unitNumber} is past due. Please submit payment via tenant portal.`;
+
+      // 1. Create targeted notification for Tenant
+      const notification = await createNotification({
+        title,
+        message: notifMsg,
+        role: 'Tenant',
+        type: tone === 'urgent' ? 'warning' : 'info',
+        companyId: invoice.companyId,
+        targetId: invoice.tenantId,
+      });
+
+      // 2. Notify Collection Manager
+      await createNotification({
+        title: 'Rent Reminder Dispatched',
+        message: `Notice sent to tenant for invoice #${invoice.id.slice(0, 6)} ($${invoice.balance})`,
+        role: 'Collection Manager',
+        companyId: invoice.companyId,
+        targetId: invoice.id,
       });
 
       return sendSuccess({

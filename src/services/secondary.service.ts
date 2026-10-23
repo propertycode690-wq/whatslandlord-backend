@@ -59,14 +59,55 @@ export class SecondaryService {
   }
 
   // Notifications
-  async getNotifications(companyId?: string, role?: string) {
+  private buildNotificationWhere(companyId?: string, role?: string, userContext?: any) {
     const whereClause: any = {};
     if (companyId) {
-      whereClause.companyId = companyId;
+      whereClause.OR = [{ companyId }, { companyId: null }];
     }
+
     if (role) {
-      whereClause.role = role;
+      const lower = role.toLowerCase().trim();
+      if (lower.includes('tenant')) {
+        whereClause.role = 'Tenant';
+        const targetIds = [userContext?.tenantId, userContext?.id].filter(Boolean);
+        if (targetIds.length > 0) {
+          whereClause.AND = [
+            {
+              OR: [
+                { targetId: { in: targetIds } },
+                { userId: { in: targetIds } },
+                { targetId: null, userId: null },
+              ],
+            },
+          ];
+        }
+      } else if (lower.includes('owner')) {
+        whereClause.role = 'Owner';
+        if (userContext?.ownerId || userContext?.id) {
+          const ownerIds = [userContext.ownerId, userContext.id].filter(Boolean);
+          whereClause.AND = [
+            {
+              OR: [
+                { targetId: { in: ownerIds } },
+                { userId: { in: ownerIds } },
+                { targetId: null, userId: null },
+              ],
+            },
+          ];
+        }
+      } else if (lower.includes('maintenance')) {
+        whereClause.role = { in: ['Maintenance Staff', 'Staff'] };
+      } else if (lower.includes('collection')) {
+        whereClause.role = 'Collection Manager';
+      } else {
+        whereClause.role = { in: ['Property Manager', 'Manager', 'Super Admin'] };
+      }
     }
+    return whereClause;
+  }
+
+  async getNotifications(companyId?: string, role?: string, userContext?: any) {
+    const whereClause = this.buildNotificationWhere(companyId, role, userContext);
     return prisma.notification.findMany({
       where: whereClause,
       orderBy: { createdAt: 'desc' },
@@ -80,22 +121,16 @@ export class SecondaryService {
     });
   }
 
-  async markAllNotificationsRead(companyId?: string, role?: string) {
-    const whereClause: any = companyId ? { companyId } : {};
-    if (role) {
-      whereClause.role = role;
-    }
+  async markAllNotificationsRead(companyId?: string, role?: string, userContext?: any) {
+    const whereClause = this.buildNotificationWhere(companyId, role, userContext);
     return prisma.notification.updateMany({
       where: whereClause,
       data: { read: true },
     });
   }
 
-  async clearNotifications(companyId?: string, role?: string) {
-    const whereClause: any = companyId ? { companyId } : {};
-    if (role) {
-      whereClause.role = role;
-    }
+  async clearNotifications(companyId?: string, role?: string, userContext?: any) {
+    const whereClause = this.buildNotificationWhere(companyId, role, userContext);
     return prisma.notification.deleteMany({
       where: whereClause,
     });

@@ -2,6 +2,7 @@ import { Response, NextFunction } from 'express';
 import prisma from '../config/database';
 import { sendSuccess } from '../utils/apiResponse';
 import { AuthenticatedRequest } from '../middlewares/auth.middleware';
+import { createNotification } from '../services/notification.helper';
 
 class ServiceRequestController {
   async getAll(req: AuthenticatedRequest, res: Response, next: NextFunction) {
@@ -192,6 +193,31 @@ class ServiceRequestController {
           messages: '[]',
           companyId,
         },
+      });
+
+      // Dispatch Notifications
+      await createNotification({
+        title: 'New Service Request',
+        message: `Request "${title || 'Maintenance'}" submitted by ${tenantName || 'Resident'} for ${propertyName || 'Property'} (Unit ${unitNumber || 'N/A'})`,
+        role: 'Property Manager',
+        companyId,
+        targetId: request.id,
+      });
+
+      await createNotification({
+        title: 'New Service Request Logged',
+        message: `${priority || 'Normal'} priority: "${title || 'Maintenance'}" at ${propertyName || 'Property'} Unit ${unitNumber || 'N/A'}`,
+        role: 'Maintenance Staff',
+        companyId,
+        targetId: request.id,
+      });
+
+      await createNotification({
+        title: 'Request Received',
+        message: `Your maintenance request "${title || 'Maintenance'}" has been logged successfully.`,
+        role: 'Tenant',
+        companyId,
+        targetId: tenantId || req.user?.userId || (req.user as any)?.id,
       });
 
       return sendSuccess({ res, statusCode: 201, data: { ...request, messages: [], requestNumber: `SR-${Date.now()}` } });

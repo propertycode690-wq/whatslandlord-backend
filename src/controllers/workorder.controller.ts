@@ -2,6 +2,7 @@ import { Response, NextFunction } from 'express';
 import prisma from '../config/database.js';
 import { sendSuccess } from '../utils/apiResponse.js';
 import { AuthenticatedRequest } from '../middlewares/auth.middleware.js';
+import { createNotification } from '../services/notification.helper.js';
 
 export class WorkOrderController {
   async getAll(req: AuthenticatedRequest, res: Response, next: NextFunction) {
@@ -178,6 +179,24 @@ export class WorkOrderController {
         },
         include: { property: true, vendor: true },
       });
+
+      // Notify Property Manager & Maintenance Staff
+      await createNotification({
+        title: 'New Work Order Created',
+        message: `Work Order: "${title}" created for ${workOrder.property?.name || 'Property'}`,
+        role: 'Property Manager',
+        companyId,
+        targetId: workOrder.id,
+      });
+
+      await createNotification({
+        title: 'New Maintenance Task Assigned',
+        message: `Work Order "${title}" has been created for ${workOrder.property?.name || 'Property'}`,
+        role: 'Maintenance Staff',
+        companyId,
+        targetId: workOrder.id,
+      });
+
       return sendSuccess({ res, statusCode: 201, data: workOrder });
     } catch (error) {
       next(error);
@@ -222,6 +241,29 @@ export class WorkOrderController {
             ...(rejectReason && { notes: rejectReason }),
           },
         });
+
+        // Notify Tenant if status changed
+        if (existingSr.tenantId && srStatus) {
+          await createNotification({
+            title: `Service Request: ${srStatus}`,
+            message: `Your maintenance request "${existingSr.title}" is now ${srStatus}.`,
+            role: 'Tenant',
+            companyId: existingSr.companyId,
+            targetId: existingSr.tenantId,
+          });
+        }
+
+        // Notify Property Manager
+        if (srStatus) {
+          await createNotification({
+            title: `Maintenance Request ${srStatus}`,
+            message: `Task "${existingSr.title}" updated to status ${srStatus}.`,
+            role: 'Property Manager',
+            companyId: existingSr.companyId,
+            targetId: existingSr.id,
+          });
+        }
+
         return sendSuccess({ res, data: updatedSr });
       }
 

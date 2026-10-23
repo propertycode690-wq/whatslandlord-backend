@@ -72,7 +72,8 @@ export class SecondaryController {
     try {
       const companyId = req.user?.companyId;
       const role = (req.query.role as string) || req.user?.roleName || (req.user as any)?.role;
-      const list = await secondaryService.getNotifications(companyId, role);
+      const userContext = { id: req.user?.userId || (req.user as any)?.id, email: req.user?.email, tenantId: (req.user as any)?.tenantId, ownerId: (req.user as any)?.ownerId };
+      const list = await secondaryService.getNotifications(companyId, role, userContext);
       return sendSuccess({ res, data: list });
     } catch (error) {
       next(error);
@@ -93,7 +94,8 @@ export class SecondaryController {
     try {
       const companyId = req.user?.companyId;
       const role = (req.query.role as string) || req.user?.roleName || (req.user as any)?.role;
-      const result = await secondaryService.markAllNotificationsRead(companyId, role);
+      const userContext = { id: req.user?.userId || (req.user as any)?.id, email: req.user?.email, tenantId: (req.user as any)?.tenantId, ownerId: (req.user as any)?.ownerId };
+      const result = await secondaryService.markAllNotificationsRead(companyId, role, userContext);
       return sendSuccess({ res, data: result });
     } catch (error) {
       next(error);
@@ -104,7 +106,8 @@ export class SecondaryController {
     try {
       const companyId = req.user?.companyId;
       const role = (req.query.role as string) || req.user?.roleName || (req.user as any)?.role;
-      const result = await secondaryService.clearNotifications(companyId, role);
+      const userContext = { id: req.user?.userId || (req.user as any)?.id, email: req.user?.email, tenantId: (req.user as any)?.tenantId, ownerId: (req.user as any)?.ownerId };
+      const result = await secondaryService.clearNotifications(companyId, role, userContext);
       return sendSuccess({ res, data: result });
     } catch (error) {
       next(error);

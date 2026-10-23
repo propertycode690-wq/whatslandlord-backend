@@ -2031,13 +2031,41 @@ export class PortalController {
     }
   }
 
-  async getTenantNotifications(req: Request, res: Response, next: NextFunction) {
+  async getTenantNotifications(req: AuthenticatedRequest, res: Response, next: NextFunction) {
     try {
-      const notes = await prisma.tenantNotification.findMany({
+      const tenantEmail = req.user?.email;
+      let tenantId: string | undefined;
+      let companyId = req.user?.companyId;
+
+      if (tenantEmail) {
+        const tenant = await prisma.tenant.findFirst({ where: { email: tenantEmail } });
+        if (tenant) {
+          tenantId = tenant.id;
+          companyId = companyId || tenant.companyId || undefined;
+        }
+      }
+
+      const tenantTargetIds = [tenantId, req.user?.userId || (req.user as any)?.id].filter(Boolean) as string[];
+
+      // Fetch from notification table where role = 'Tenant'
+      const roleNotifs = await prisma.notification.findMany({
+        where: {
+          role: 'Tenant',
+          ...(companyId ? { OR: [{ companyId }, { companyId: null }] } : {}),
+          ...(tenantTargetIds.length > 0
+            ? {
+                OR: [
+                  { targetId: { in: tenantTargetIds } },
+                  { userId: { in: tenantTargetIds } },
+                  { targetId: null, userId: null },
+                ],
+              }
+            : {}),
+        },
         orderBy: { createdAt: 'desc' },
       });
 
-      const formatted = notes.map((n: any) => ({
+      const formatted = roleNotifs.map((n: any) => ({
         id: n.id,
         title: n.title,
         message: n.message,
@@ -2054,15 +2082,34 @@ export class PortalController {
     }
   }
 
-  async markTenantNotificationRead(req: Request, res: Response, next: NextFunction) {
+  async markTenantNotificationRead(req: AuthenticatedRequest, res: Response, next: NextFunction) {
     try {
       const id = req.params.id as string;
       if (id === 'all') {
-        await prisma.tenantNotification.updateMany({
+        const tenantEmail = req.user?.email;
+        let tenantId: string | undefined;
+        if (tenantEmail) {
+          const tenant = await prisma.tenant.findFirst({ where: { email: tenantEmail } });
+          if (tenant) tenantId = tenant.id;
+        }
+        const targetIds = [tenantId, req.user?.userId || (req.user as any)?.id].filter(Boolean) as string[];
+        await prisma.notification.updateMany({
+          where: {
+            role: 'Tenant',
+            ...(targetIds.length > 0
+              ? {
+                  OR: [
+                    { targetId: { in: targetIds } },
+                    { userId: { in: targetIds } },
+                    { targetId: null, userId: null },
+                  ],
+                }
+              : {}),
+          },
           data: { read: true },
         });
       } else {
-        await prisma.tenantNotification.update({
+        await prisma.notification.updateMany({
           where: { id },
           data: { read: true },
         });
@@ -2073,10 +2120,42 @@ export class PortalController {
     }
   }
 
-  async clearTenantNotifications(req: Request, res: Response, next: NextFunction) {
+  async clearTenantNotifications(req: AuthenticatedRequest, res: Response, next: NextFunction) {
     try {
-      await prisma.tenantNotification.deleteMany({});
+      const tenantEmail = req.user?.email;
+      let tenantId: string | undefined;
+      if (tenantEmail) {
+        const tenant = await prisma.tenant.findFirst({ where: { email: tenantEmail } });
+        if (tenant) tenantId = tenant.id;
+      }
+      const targetIds = [tenantId, req.user?.userId || (req.user as any)?.id].filter(Boolean) as string[];
+      await prisma.notification.deleteMany({
+        where: {
+          role: 'Tenant',
+          ...(targetIds.length > 0
+            ? {
+                OR: [
+                  { targetId: { in: targetIds } },
+                  { userId: { in: targetIds } },
+                  { targetId: null, userId: null },
+                ],
+              }
+            : {}),
+        },
+      });
       return sendSuccess({ res, message: 'All notifications cleared' });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async deleteTenantNotification(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+    try {
+      const id = String(req.params.id);
+      await prisma.notification.deleteMany({
+        where: { id },
+      });
+      return sendSuccess({ res, message: 'Notification deleted' });
     } catch (error) {
       next(error);
     }

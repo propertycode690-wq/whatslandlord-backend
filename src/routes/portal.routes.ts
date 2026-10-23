@@ -22,6 +22,7 @@ router.get('/tenant/messages', (req, res, next) => portalController.getTenantMes
 router.post('/tenant/messages', (req, res, next) => portalController.createTenantMessage(req, res, next));
 router.get('/tenant/notifications', (req, res, next) => portalController.getTenantNotifications(req, res, next));
 router.patch('/tenant/notifications/:id/read', (req, res, next) => portalController.markTenantNotificationRead(req, res, next));
+router.delete('/tenant/notifications/:id', (req, res, next) => portalController.deleteTenantNotification(req, res, next));
 router.delete('/tenant/notifications', (req, res, next) => portalController.clearTenantNotifications(req, res, next));
 
 // Owner Portal Views

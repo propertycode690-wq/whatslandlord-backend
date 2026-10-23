@@ -423,10 +423,11 @@ export class PaymentService {
         }
       });
 
-      // Create real notifications for Property Manager and Tenant
+      // Create real notifications for Property Manager, Tenant, Collection Manager, and Owner
       const tenantNameStr = tenant ? `${tenant.firstName} ${tenant.lastName}` : 'Resident';
       const unitNumStr = unit ? unit.unitNumber : '';
 
+      // 1. Property Manager
       await tx.notification.create({
         data: {
           title: 'Payment Received',
@@ -438,6 +439,7 @@ export class PaymentService {
         },
       });
 
+      // 2. Tenant (strictly addressed to this tenant)
       await tx.notification.create({
         data: {
           title: 'Payment Receipt Confirmed',
@@ -445,9 +447,35 @@ export class PaymentService {
           type: 'success',
           role: 'Tenant',
           companyId: payment.companyId,
+          targetId: tenant ? tenant.id : payment.id,
+        },
+      });
+
+      // 3. Collection Manager
+      await tx.notification.create({
+        data: {
+          title: 'Rent Collected',
+          message: `Payment of $${payment.amount.toLocaleString()} cleared for ${tenantNameStr} (Unit ${unitNumStr || 'N/A'})`,
+          type: 'success',
+          role: 'Collection Manager',
+          companyId: payment.companyId,
           targetId: payment.id,
         },
       });
+
+      // 4. Owner (if property owner exists)
+      if (property?.ownerId) {
+        await tx.notification.create({
+          data: {
+            title: 'Rental Income Collected',
+            message: `Rent of $${payment.amount.toLocaleString()} collected for ${property.name || 'your property'}`,
+            type: 'success',
+            role: 'Owner',
+            companyId: payment.companyId,
+            targetId: property.ownerId,
+          },
+        });
+      }
 
       // Dispatch live Meta WhatsApp message if tenant phone is registered
       if (tenant?.phone && payment.companyId) {
