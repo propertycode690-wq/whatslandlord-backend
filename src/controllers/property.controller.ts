@@ -37,6 +37,22 @@ export class PropertyController {
     }
   }
 
+  async bulkImport(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+    try {
+      const companyId = req.user?.companyId;
+      const properties = Array.isArray(req.body) ? req.body : (req.body?.properties || []);
+      const result = await propertyService.bulkImportProperties(properties, companyId);
+      return sendSuccess({
+        res,
+        statusCode: 201,
+        message: `Successfully imported ${result.count} properties`,
+        data: result,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
   async delete(req: AuthenticatedRequest, res: Response, next: NextFunction) {
     try {
       const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;

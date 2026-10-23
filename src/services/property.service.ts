@@ -204,7 +204,170 @@ export class PropertyService {
     return createdProp;
   }
 
+  async bulkImportProperties(propertiesList: any[], companyId?: string) {
+    if (!Array.isArray(propertiesList) || propertiesList.length === 0) {
+      throw new AppError('No properties provided for import.', 400, 'INVALID_INPUT');
+    }
 
+    const resolvedCompanyId = await getManagerCompanyId(undefined, companyId);
+
+    if (resolvedCompanyId) {
+      const company = await prisma.company.findUnique({ where: { id: resolvedCompanyId } });
+      if (company) {
+        const currentCount = await prisma.property.count({
+          where: { companyId: resolvedCompanyId, status: { notIn: ['Inactive', 'Deleted'] } },
+        });
+        const maxLimit = company.maxProperties || 50;
+        if (currentCount + propertiesList.length > maxLimit) {
+          throw new AppError(
+            `Import exceeds your plan limit! Your plan allows up to ${maxLimit} properties. Current: ${currentCount}, Attempting to import: ${propertiesList.length}. Please upgrade your plan or reduce the import list.`,
+            403,
+            'PLAN_LIMIT_EXCEEDED'
+          );
+        }
+      }
+    }
+
+    // Resolve or create default owner
+    let defaultOwner = await prisma.owner.findFirst({
+      where: resolvedCompanyId ? { companyId: resolvedCompanyId } : {},
+    });
+    if (!defaultOwner) {
+      defaultOwner = await prisma.owner.create({
+        data: {
+          name: 'Default Owner',
+          email: `default.owner.${Date.now()}@example.com`,
+          phone: '555-0100',
+          companyId: resolvedCompanyId,
+        },
+      });
+    }
+
+    const validTypes = ['Apartment', 'Commercial', 'SingleFamily', 'MultiFamily', 'HOA'];
+    const importedProperties: any[] = [];
+
+    // Execute in transaction to ensure all or nothing with complete integrity
+    // Set higher timeout (120s) and maxWait (20s) for bulk processing
+    await prisma.$transaction(
+      async (tx) => {
+        // Pre-fetch all existing owners for the company to avoid repetitive DB lookups
+        const existingOwners = await tx.owner.findMany({
+          where: resolvedCompanyId ? { companyId: resolvedCompanyId } : {},
+        });
+        const ownerMap = new Map<string, string>();
+        for (const o of existingOwners) {
+          if (o.name) {
+            ownerMap.set(o.name.trim().toLowerCase(), o.id);
+          }
+        }
+
+        for (const item of propertiesList) {
+          if (!item.name || !item.name.trim()) continue;
+
+          let typeVal = (item.type || 'Apartment').replace(/\s+/g, '');
+          if (typeVal === 'MUP' || typeVal.includes('Mixed') || typeVal.includes('MUP')) {
+            typeVal = 'Commercial';
+          }
+          if (!validTypes.includes(typeVal)) {
+            typeVal = 'Apartment';
+          }
+
+          // Resolve Owner: check ownerId, or ownerName from map / create new, or default
+          let resolvedOwnerId = item.ownerId;
+          if (!resolvedOwnerId && item.ownerName && typeof item.ownerName === 'string' && item.ownerName.trim()) {
+            const trimmedOwnerName = item.ownerName.trim();
+            const lowerName = trimmedOwnerName.toLowerCase();
+
+            if (ownerMap.has(lowerName)) {
+              resolvedOwnerId = ownerMap.get(lowerName)!;
+            } else {
+              const cleanAlias = lowerName.replace(/[^a-z0-9]/g, '') || 'owner';
+              const newOwner = await tx.owner.create({
+                data: {
+                  name: trimmedOwnerName,
+                  email: `${cleanAlias}.${Date.now()}-${Math.floor(Math.random() * 1000)}@example.com`,
+                  phone: '555-0100',
+                  companyId: resolvedCompanyId,
+                },
+              });
+              resolvedOwnerId = newOwner.id;
+              ownerMap.set(lowerName, newOwner.id);
+            }
+          }
+
+          if (!resolvedOwnerId) {
+            resolvedOwnerId = defaultOwner!.id;
+          }
+
+          const street = (item.streetAddress || item.address || item.name || '100 Main St').trim();
+          const city = (item.city || 'Austin').trim();
+          const state = (item.state || 'TX').trim();
+          const zip = (item.zip || '78701').trim();
+          const country = (item.country || 'USA').trim();
+          const combinedAddress = `${street}, ${city}, ${state} ${zip}`;
+
+          const unitsCount = Math.max(1, Number(item.totalUnits || item.unitsCount || 1));
+          const occupiedUnits = Math.max(0, Math.min(unitsCount, Number(item.occupiedUnits || 0)));
+          const occupancyRate = item.occupancyRate !== undefined && item.occupancyRate !== null && !isNaN(Number(item.occupancyRate))
+            ? Number(item.occupancyRate)
+            : (unitsCount > 0 ? Math.round((occupiedUnits / unitsCount) * 100) : 0);
+
+          const floors = Math.max(1, Number(item.totalFloors || item.floors || 1));
+          const totalBuildings = Math.max(1, Number(item.totalBuildings || 1));
+
+          const prop = await tx.property.create({
+            data: {
+              name: item.name.trim(),
+              type: typeVal as any,
+              status: item.status || 'Active',
+              ownerId: resolvedOwnerId,
+              ownershipPercentage: Number(item.ownershipPercentage) || 100,
+              managementCompany: item.managementCompany || 'Apex Property Management',
+              address: combinedAddress,
+              streetAddress: street,
+              city,
+              state,
+              country,
+              zip,
+              unitsCount,
+              occupiedUnits,
+              occupancyRate,
+              monthlyRevenue: Number(item.monthlyRevenue) || 0,
+              monthlyExpenses: Number(item.monthlyExpenses) || 0,
+              yearBuilt: Number(item.yearBuilt) || 2020,
+              totalBuildings,
+              squareFootage: Number(item.squareFootage) || 10000,
+              purchasePrice: Number(item.purchasePrice) || 1000000,
+              currentValue: Number(item.currentValue) || 1200000,
+              companyId: resolvedCompanyId,
+              nycBin: item.nycBin || null,
+            },
+          });
+
+          await tx.building.create({
+            data: {
+              propertyId: prop.id,
+              name: prop.name,
+              floors,
+              unitsCount,
+              occupancyRate,
+            },
+          });
+
+          importedProperties.push(prop);
+        }
+      },
+      {
+        maxWait: 20000, // 20s max wait to acquire connection
+        timeout: 120000, // 120s timeout for large bulk imports
+      }
+    );
+
+    return {
+      count: importedProperties.length,
+      properties: importedProperties,
+    };
+  }
   async updateProperty(id: string, data: any, file?: any, companyId?: string) {
     const prop = await prisma.property.findFirst({
       where: companyId ? { id, companyId } : { id },
