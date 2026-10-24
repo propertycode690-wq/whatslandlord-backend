@@ -11,12 +11,11 @@ class RenewalService {
         const now = new Date();
         const sixtyDaysFromNow = new Date();
         sixtyDaysFromNow.setDate(now.getDate() + 60);
-        // Find all active leases expiring within 60 days
+        // Find all active leases expiring within 60 days (including expired active leases requiring renewal)
         const activeLeases = await database_1.default.lease.findMany({
             where: {
                 status: 'Active',
                 endDate: {
-                    gte: now,
                     lte: sixtyDaysFromNow,
                 },
             },
@@ -43,13 +42,37 @@ class RenewalService {
             }
         }
     }
+    async ensureRenewalExists(leaseId) {
+        let renewal = await database_1.default.leaseRenewal.findUnique({
+            where: { leaseId },
+            include: { lease: true },
+        });
+        if (!renewal) {
+            const lease = await database_1.default.lease.findUnique({ where: { id: leaseId } });
+            if (!lease)
+                throw new Error('Lease not found.');
+            const newEndDate = new Date(lease.endDate);
+            newEndDate.setMonth(newEndDate.getMonth() + 12);
+            renewal = await database_1.default.leaseRenewal.create({
+                data: {
+                    leaseId: lease.id,
+                    newRentAmount: lease.rentAmount,
+                    newEndDate,
+                    termMonths: 12,
+                    status: 'PENDING',
+                },
+                include: { lease: true },
+            });
+        }
+        return renewal;
+    }
     async getAllRenewals(companyId) {
         try {
             // Auto-trigger renewal detection on fetch
             await this.autoCreatePendingRenewals();
         }
         catch (e) {
-            console.error('Error auto-creating pending renewals:', e);
+            globalThis.console?.error('Error auto-creating pending renewals:', e);
         }
         return database_1.default.leaseRenewal.findMany({
             where: companyId ? { lease: { companyId } } : {},
@@ -66,30 +89,21 @@ class RenewalService {
         });
     }
     async sendOffer(leaseId) {
-        const renewal = await database_1.default.leaseRenewal.findUnique({
-            where: { leaseId },
-        });
-        if (!renewal)
-            throw new Error('Renewal record not found.');
+        const renewal = await this.ensureRenewalExists(leaseId);
         return database_1.default.leaseRenewal.update({
             where: { leaseId },
             data: { status: 'OFFER_SENT' },
         });
     }
     async updateRenewal(leaseId, data) {
-        const renewal = await database_1.default.leaseRenewal.findUnique({
-            where: { leaseId },
-            include: { lease: true },
-        });
-        if (!renewal)
-            throw new Error('Renewal record not found.');
+        const renewal = await this.ensureRenewalExists(leaseId);
         const newRentAmount = data.newRentAmount !== undefined ? parseFloat(data.newRentAmount) : renewal.newRentAmount;
         const termMonths = data.termMonths !== undefined ? parseInt(data.termMonths) : renewal.termMonths;
         let computedEndDate = renewal.newEndDate;
         if (data.newEndDate) {
             computedEndDate = new Date(data.newEndDate);
         }
-        else if (data.termMonths !== undefined) {
+        else if (data.termMonths !== undefined && renewal.lease) {
             computedEndDate = new Date(renewal.lease.endDate);
             computedEndDate.setMonth(computedEndDate.getMonth() + termMonths);
         }
@@ -103,6 +117,7 @@ class RenewalService {
         });
     }
     async acceptRenewal(leaseId, companyId, termMonths) {
+        await this.ensureRenewalExists(leaseId);
         const renewal = await database_1.default.leaseRenewal.findFirst({
             where: {
                 leaseId,
@@ -147,6 +162,7 @@ class RenewalService {
         });
     }
     async rejectRenewal(leaseId, companyId) {
+        await this.ensureRenewalExists(leaseId);
         const renewal = await database_1.default.leaseRenewal.findFirst({
             where: {
                 leaseId,

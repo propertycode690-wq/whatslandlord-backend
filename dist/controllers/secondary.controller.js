@@ -72,7 +72,8 @@ class SecondaryController {
         try {
             const companyId = req.user?.companyId;
             const role = req.query.role || req.user?.roleName || req.user?.role;
-            const list = await secondary_service_1.secondaryService.getNotifications(companyId, role);
+            const userContext = { id: req.user?.userId || req.user?.id, email: req.user?.email, tenantId: req.user?.tenantId, ownerId: req.user?.ownerId };
+            const list = await secondary_service_1.secondaryService.getNotifications(companyId, role, userContext);
             return (0, apiResponse_1.sendSuccess)({ res, data: list });
         }
         catch (error) {
@@ -93,7 +94,8 @@ class SecondaryController {
         try {
             const companyId = req.user?.companyId;
             const role = req.query.role || req.user?.roleName || req.user?.role;
-            const result = await secondary_service_1.secondaryService.markAllNotificationsRead(companyId, role);
+            const userContext = { id: req.user?.userId || req.user?.id, email: req.user?.email, tenantId: req.user?.tenantId, ownerId: req.user?.ownerId };
+            const result = await secondary_service_1.secondaryService.markAllNotificationsRead(companyId, role, userContext);
             return (0, apiResponse_1.sendSuccess)({ res, data: result });
         }
         catch (error) {
@@ -104,7 +106,8 @@ class SecondaryController {
         try {
             const companyId = req.user?.companyId;
             const role = req.query.role || req.user?.roleName || req.user?.role;
-            const result = await secondary_service_1.secondaryService.clearNotifications(companyId, role);
+            const userContext = { id: req.user?.userId || req.user?.id, email: req.user?.email, tenantId: req.user?.tenantId, ownerId: req.user?.ownerId };
+            const result = await secondary_service_1.secondaryService.clearNotifications(companyId, role, userContext);
             return (0, apiResponse_1.sendSuccess)({ res, data: result });
         }
         catch (error) {
@@ -148,6 +151,34 @@ class SecondaryController {
             const { prompt } = req.body;
             const result = await secondary_service_1.secondaryService.processAiChat(prompt || 'Show summary', req.user);
             return (0, apiResponse_1.sendSuccess)({ res, data: result });
+        }
+        catch (error) {
+            next(error);
+        }
+    }
+    // 1-to-1 Direct Messaging (Zero Leakage)
+    async getDirectMessages(req, res, next) {
+        try {
+            const messages = await secondary_service_1.secondaryService.getDirectMessages(req.user);
+            return (0, apiResponse_1.sendSuccess)({ res, data: messages });
+        }
+        catch (error) {
+            next(error);
+        }
+    }
+    async sendDirectMessage(req, res, next) {
+        try {
+            const newMsg = await secondary_service_1.secondaryService.sendDirectMessage(req.user, req.body);
+            return (0, apiResponse_1.sendSuccess)({ res, statusCode: 201, data: newMsg });
+        }
+        catch (error) {
+            next(error);
+        }
+    }
+    async getDirectContacts(req, res, next) {
+        try {
+            const contacts = await secondary_service_1.secondaryService.getDirectContacts(req.user);
+            return (0, apiResponse_1.sendSuccess)({ res, data: contacts });
         }
         catch (error) {
             next(error);

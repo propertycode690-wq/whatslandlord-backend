@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.workOrderController = exports.WorkOrderController = void 0;
 const database_js_1 = __importDefault(require("../config/database.js"));
 const apiResponse_js_1 = require("../utils/apiResponse.js");
+const notification_helper_js_1 = require("../services/notification.helper.js");
 class WorkOrderController {
     async getAll(req, res, next) {
         try {
@@ -60,6 +61,7 @@ class WorkOrderController {
                     vendorName: sr.assignedVendorName || sr.assignedTechnician || 'Unassigned',
                     assignedTechnician: sr.assignedTechnician || sr.assignedVendorName || 'Unassigned',
                     scheduledDate: sr.scheduledDate || (sr.createdAt ? new Date(sr.createdAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]),
+                    preferredTime: sr.scheduledDate || (sr.notes?.includes('Preferred Visit:') ? sr.notes.replace('Preferred Visit:', '').trim() : null) || (sr.description?.match(/\[Preferred Visit:\s*([^\]]+)\]/)?.[1]) || null,
                     priority: sr.priority === 'Normal' ? 'Medium' : sr.priority || 'Medium',
                     status: sr.status === 'Open' || sr.status === 'New' || sr.status === 'Submitted' ? 'Open' : sr.status === 'InProgress' || sr.status === 'In Progress' ? 'In Progress' : sr.status === 'Completed' ? 'Completed' : sr.status === 'Closed' ? 'Closed' : sr.status === 'Rejected' ? 'Rejected' : sr.status === 'Assigned' ? 'Assigned' : sr.status || 'Open',
                     estimatedCost: est,
@@ -131,6 +133,7 @@ class WorkOrderController {
                         vendorName: sr.assignedVendorName || 'ProFix Solutions',
                         assignedTechnician: sr.assignedVendorName || sr.assignedTechnician || 'Technician Lead 1',
                         scheduledDate: sr.scheduledDate || new Date().toISOString().split('T')[0],
+                        preferredTime: sr.scheduledDate || (sr.notes?.includes('Preferred Visit:') ? sr.notes.replace('Preferred Visit:', '').trim() : null) || (sr.description?.match(/\[Preferred Visit:\s*([^\]]+)\]/)?.[1]) || null,
                         priority: sr.priority || 'Normal',
                         status: sr.status === 'Open' || sr.status === 'New' ? 'Open' : sr.status === 'InProgress' || sr.status === 'In Progress' ? 'In Progress' : sr.status === 'Completed' ? 'Completed' : sr.status === 'Closed' ? 'Closed' : sr.status === 'Rejected' ? 'Rejected' : sr.status === 'Assigned' ? 'Assigned' : sr.status || 'Open',
                         estimatedCost: sr.estimatedCost || 0,
@@ -168,6 +171,21 @@ class WorkOrderController {
                     companyId,
                 },
                 include: { property: true, vendor: true },
+            });
+            // Notify Property Manager & Maintenance Staff
+            await (0, notification_helper_js_1.createNotification)({
+                title: 'New Work Order Created',
+                message: `Work Order: "${title}" created for ${workOrder.property?.name || 'Property'}`,
+                role: 'Property Manager',
+                companyId,
+                targetId: workOrder.id,
+            });
+            await (0, notification_helper_js_1.createNotification)({
+                title: 'New Maintenance Task Assigned',
+                message: `Work Order "${title}" has been created for ${workOrder.property?.name || 'Property'}`,
+                role: 'Maintenance Staff',
+                companyId,
+                targetId: workOrder.id,
             });
             return (0, apiResponse_js_1.sendSuccess)({ res, statusCode: 201, data: workOrder });
         }
@@ -210,6 +228,26 @@ class WorkOrderController {
                         ...(rejectReason && { notes: rejectReason }),
                     },
                 });
+                // Notify Tenant if status changed
+                if (existingSr.tenantId && srStatus) {
+                    await (0, notification_helper_js_1.createNotification)({
+                        title: `Service Request: ${srStatus}`,
+                        message: `Your maintenance request "${existingSr.title}" is now ${srStatus}.`,
+                        role: 'Tenant',
+                        companyId: existingSr.companyId,
+                        targetId: existingSr.tenantId,
+                    });
+                }
+                // Notify Property Manager
+                if (srStatus) {
+                    await (0, notification_helper_js_1.createNotification)({
+                        title: `Maintenance Request ${srStatus}`,
+                        message: `Task "${existingSr.title}" updated to status ${srStatus}.`,
+                        role: 'Property Manager',
+                        companyId: existingSr.companyId,
+                        targetId: existingSr.id,
+                    });
+                }
                 return (0, apiResponse_js_1.sendSuccess)({ res, data: updatedSr });
             }
             // 2. Check WorkOrder table

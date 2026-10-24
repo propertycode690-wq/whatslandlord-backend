@@ -7,6 +7,7 @@ const validate_middleware_1 = require("../middlewares/validate.middleware");
 const property_validation_1 = require("../validations/property.validation");
 const router = (0, express_1.Router)();
 router.get('/', (req, res, next) => property_controller_1.propertyController.getAll(req, res, next));
+router.post('/bulk-import', (req, res, next) => property_controller_1.propertyController.bulkImport(req, res, next));
 router.get('/:id', (req, res, next) => property_controller_1.propertyController.getById(req, res, next));
 router.post('/', upload_middleware_1.upload.single('image'), (0, validate_middleware_1.validateRequest)(property_validation_1.createPropertySchema), (req, res, next) => property_controller_1.propertyController.create(req, res, next));
 router.put('/:id', upload_middleware_1.upload.single('image'), (0, validate_middleware_1.validateRequest)(property_validation_1.updatePropertySchema), (req, res, next) => property_controller_1.propertyController.update(req, res, next));

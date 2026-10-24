@@ -91,6 +91,21 @@ class PortalController {
                         tenant: true,
                     },
                 });
+                const leaseDocs = await database_1.default.tenantDocument.findMany({
+                    where: {
+                        tenantId: tenant.id,
+                        category: { in: ['Lease', 'Leasing', 'Rental Agreement'] },
+                    },
+                    orderBy: { uploadedAt: 'desc' },
+                });
+                if (leaseDocs.length > 0) {
+                    leases = leases.map((l) => ({
+                        ...l,
+                        documentUrl: leaseDocs[0].fileUrl,
+                        documentName: leaseDocs[0].name,
+                        leaseDocument: leaseDocs[0],
+                    }));
+                }
             }
             return (0, apiResponse_1.sendSuccess)({ res, data: leases });
         }
@@ -108,6 +123,21 @@ class PortalController {
                     data: null,
                 });
             }
+            let documentUrl = null;
+            let documentName = null;
+            if (tenant) {
+                const leaseDoc = await database_1.default.tenantDocument.findFirst({
+                    where: {
+                        tenantId: tenant.id,
+                        category: { in: ['Lease', 'Leasing', 'Rental Agreement'] },
+                    },
+                    orderBy: { uploadedAt: 'desc' },
+                });
+                if (leaseDoc) {
+                    documentUrl = leaseDoc.fileUrl;
+                    documentName = leaseDoc.name;
+                }
+            }
             return (0, apiResponse_1.sendSuccess)({
                 res,
                 data: {
@@ -122,6 +152,8 @@ class PortalController {
                     tenantName: tenant ? `${tenant.firstName} ${tenant.lastName}` : 'Sarah Connor',
                     property: lease.property,
                     unit: lease.unit,
+                    documentUrl,
+                    documentName,
                     tenant: {
                         id: tenant?.id || 't-1',
                         firstName: tenant?.firstName || 'Sarah',
@@ -283,7 +315,7 @@ class PortalController {
                 status: sr.status || 'Submitted',
                 date: sr.createdAt ? new Date(sr.createdAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
                 description: sr.description || '',
-                preferredTime: 'Morning (8AM - 12PM)',
+                preferredTime: sr.scheduledDate || (sr.notes?.includes('Preferred Visit:') ? sr.notes.replace('Preferred Visit:', '').trim() : null) || (sr.description?.match(/\[Preferred Visit:\s*([^\]]+)\]/)?.[1]) || 'Morning (8AM - 12PM)',
             }));
             return (0, apiResponse_1.sendSuccess)({ res, data: formatted });
         }
@@ -316,6 +348,27 @@ class PortalController {
             else if (textToAnalyze.includes('disposal') || textToAnalyze.includes('dryer') || textToAnalyze.includes('washer') || textToAnalyze.includes('fridge') || textToAnalyze.includes('refrigerator') || textToAnalyze.includes('stove') || textToAnalyze.includes('oven')) {
                 category = 'Appliance';
             }
+            // Auto-detect emergency hazard
+            let computedPriority = priority || 'Normal';
+            if (textToAnalyze.includes('gas') ||
+                textToAnalyze.includes('smoke') ||
+                textToAnalyze.includes('fire') ||
+                textToAnalyze.includes('flood') ||
+                textToAnalyze.includes('spark') ||
+                textToAnalyze.includes('burst pipe') ||
+                textToAnalyze.includes('carbon monoxide')) {
+                computedPriority = 'Emergency';
+            }
+            // AI Estimated Cost benchmark based on category (prevents cost 0)
+            let benchmarkCost = 120;
+            if (category === 'HVAC')
+                benchmarkCost = 220;
+            else if (category === 'Plumbing')
+                benchmarkCost = 150;
+            else if (category === 'Electrical')
+                benchmarkCost = 160;
+            else if (category === 'Appliance')
+                benchmarkCost = 180;
             // 2. Auto-find matching vendor for this company & category
             const reqCategoryLower = category.toLowerCase();
             let vendor = await database_1.default.vendor.findFirst({
@@ -338,7 +391,7 @@ class PortalController {
                     id: `msg-${Date.now()}`,
                     senderName: 'WhatsLandlord AI System',
                     role: 'System',
-                    text: `Ticket automatically categorized as '${category}' and assigned to ${assignedVendorName} (${assignedTechnician}). Contractor notified.`,
+                    text: `Ticket automatically categorized as '${category}' with AI estimated cost of $${benchmarkCost}${computedPriority === 'Emergency' ? ' [EMERGENCY HAZARD FLAGGED]' : ''} and assigned to ${assignedVendorName} (${assignedTechnician}). Contractor notified.`,
                     timestamp: new Date().toLocaleString(),
                 },
             ]);
@@ -346,7 +399,9 @@ class PortalController {
                 data: {
                     title: title || `${category} Repair Request`,
                     description: description || '',
-                    priority: priority || 'Normal',
+                    scheduledDate: preferredTime || null,
+                    notes: preferredTime ? `Preferred Visit: ${preferredTime}` : null,
+                    priority: computedPriority,
                     status: 'Assigned',
                     category: category,
                     propertyId: propertyId,
@@ -357,6 +412,8 @@ class PortalController {
                     assignedVendorId: assignedVendorId,
                     assignedVendorName: assignedVendorName,
                     assignedTechnician: assignedTechnician,
+                    estimatedCost: benchmarkCost,
+                    cost: benchmarkCost,
                     companyId: companyId,
                     messages: initialMessage,
                 },
@@ -412,12 +469,38 @@ class PortalController {
         try {
             const tenant = await this.getTenantForUser(req);
             const { name, category, size } = req.body;
+            const file = req.file;
+            let fileUrl = req.body.fileUrl || null;
+            let fileSizeStr = size || '1.5 MB';
+            if (file) {
+                try {
+                    fileUrl = await new Promise((resolve, reject) => {
+                        const uploadStream = cloudinary_1.default.uploader.upload_stream({ folder: 'tenant-documents', resource_type: 'auto' }, (error, result) => {
+                            if (error)
+                                return reject(error);
+                            resolve(result?.secure_url || '');
+                        });
+                        uploadStream.end(file.buffer);
+                    });
+                    const k = 1024;
+                    const i = Math.floor(Math.log(file.size) / Math.log(k));
+                    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+                    fileSizeStr = parseFloat((file.size / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+                }
+                catch (err) {
+                    console.error('Cloudinary tenant upload failed in portal:', err);
+                }
+            }
             const newDoc = await database_1.default.tenantDocument.create({
                 data: {
-                    name: name || 'Tenant_Document.pdf',
+                    name: name || file?.originalname || 'Tenant_Document.pdf',
                     category: category || 'Rental Agreement',
-                    size: size || '1.5 MB',
+                    size: fileSizeStr,
+                    fileUrl,
                     tenantId: tenant?.id || undefined,
+                    companyId: tenant?.companyId || tenant?.leases?.[0]?.companyId || tenant?.unit?.property?.companyId || req.user?.companyId || undefined,
+                    propertyId: tenant?.leases?.[0]?.propertyId || tenant?.unit?.propertyId || undefined,
+                    unitId: tenant?.unitId || undefined,
                 },
             });
             return (0, apiResponse_1.sendSuccess)({
@@ -429,6 +512,7 @@ class PortalController {
                     category: newDoc.category,
                     uploadedAt: new Date(newDoc.uploadedAt).toISOString().split('T')[0],
                     size: newDoc.size,
+                    fileUrl: newDoc.fileUrl,
                 },
             });
         }
@@ -701,14 +785,44 @@ class PortalController {
     async uploadOwnerDocument(req, res, next) {
         try {
             const userEmail = req.user?.email;
-            const owner = userEmail ? await database_1.default.owner.findFirst({ where: { email: userEmail } }) : null;
+            const owner = userEmail
+                ? await database_1.default.owner.findFirst({
+                    where: { email: userEmail },
+                    include: { properties: true },
+                })
+                : null;
             const { name, category, size } = req.body;
+            const file = req.file;
+            let fileUrl = req.body.fileUrl || null;
+            let fileSizeStr = size || '1.5 MB';
+            if (file) {
+                try {
+                    fileUrl = await new Promise((resolve, reject) => {
+                        const uploadStream = cloudinary_1.default.uploader.upload_stream({ folder: 'owner-documents', resource_type: 'auto' }, (error, result) => {
+                            if (error)
+                                return reject(error);
+                            resolve(result?.secure_url || '');
+                        });
+                        uploadStream.end(file.buffer);
+                    });
+                    const k = 1024;
+                    const i = Math.floor(Math.log(file.size) / Math.log(k));
+                    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+                    fileSizeStr = parseFloat((file.size / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+                }
+                catch (err) {
+                    console.error('Cloudinary owner upload failed in portal:', err);
+                }
+            }
             const newDoc = await database_1.default.ownerDocument.create({
                 data: {
-                    name: name || 'Document.pdf',
+                    name: name || file?.originalname || 'Owner_Document.pdf',
                     category: category || 'Statements',
-                    size: size || '1.5 MB',
+                    size: fileSizeStr,
+                    fileUrl,
+                    companyId: owner?.companyId || owner?.properties?.[0]?.companyId || req.user?.companyId || undefined,
                     ownerId: owner?.id || undefined,
+                    propertyId: owner?.properties?.[0]?.id || undefined,
                 },
             });
             return (0, apiResponse_1.sendSuccess)({
@@ -720,6 +834,7 @@ class PortalController {
                     category: newDoc.category,
                     uploadedAt: new Date(newDoc.uploadedAt).toISOString().split('T')[0],
                     size: newDoc.size,
+                    fileUrl: newDoc.fileUrl,
                 },
             });
         }
@@ -1822,10 +1937,35 @@ class PortalController {
     }
     async getTenantNotifications(req, res, next) {
         try {
-            const notes = await database_1.default.tenantNotification.findMany({
+            const tenantEmail = req.user?.email;
+            let tenantId;
+            let companyId = req.user?.companyId;
+            if (tenantEmail) {
+                const tenant = await database_1.default.tenant.findFirst({ where: { email: tenantEmail } });
+                if (tenant) {
+                    tenantId = tenant.id;
+                    companyId = companyId || tenant.companyId || undefined;
+                }
+            }
+            const tenantTargetIds = [tenantId, req.user?.userId || req.user?.id].filter(Boolean);
+            // Fetch from notification table where role = 'Tenant'
+            const roleNotifs = await database_1.default.notification.findMany({
+                where: {
+                    role: 'Tenant',
+                    ...(companyId ? { OR: [{ companyId }, { companyId: null }] } : {}),
+                    ...(tenantTargetIds.length > 0
+                        ? {
+                            OR: [
+                                { targetId: { in: tenantTargetIds } },
+                                { userId: { in: tenantTargetIds } },
+                                { targetId: null, userId: null },
+                            ],
+                        }
+                        : {}),
+                },
                 orderBy: { createdAt: 'desc' },
             });
-            const formatted = notes.map((n) => ({
+            const formatted = roleNotifs.map((n) => ({
                 id: n.id,
                 title: n.title,
                 message: n.message,
@@ -1845,12 +1985,32 @@ class PortalController {
         try {
             const id = req.params.id;
             if (id === 'all') {
-                await database_1.default.tenantNotification.updateMany({
+                const tenantEmail = req.user?.email;
+                let tenantId;
+                if (tenantEmail) {
+                    const tenant = await database_1.default.tenant.findFirst({ where: { email: tenantEmail } });
+                    if (tenant)
+                        tenantId = tenant.id;
+                }
+                const targetIds = [tenantId, req.user?.userId || req.user?.id].filter(Boolean);
+                await database_1.default.notification.updateMany({
+                    where: {
+                        role: 'Tenant',
+                        ...(targetIds.length > 0
+                            ? {
+                                OR: [
+                                    { targetId: { in: targetIds } },
+                                    { userId: { in: targetIds } },
+                                    { targetId: null, userId: null },
+                                ],
+                            }
+                            : {}),
+                    },
                     data: { read: true },
                 });
             }
             else {
-                await database_1.default.tenantNotification.update({
+                await database_1.default.notification.updateMany({
                     where: { id },
                     data: { read: true },
                 });
@@ -1863,8 +2023,41 @@ class PortalController {
     }
     async clearTenantNotifications(req, res, next) {
         try {
-            await database_1.default.tenantNotification.deleteMany({});
+            const tenantEmail = req.user?.email;
+            let tenantId;
+            if (tenantEmail) {
+                const tenant = await database_1.default.tenant.findFirst({ where: { email: tenantEmail } });
+                if (tenant)
+                    tenantId = tenant.id;
+            }
+            const targetIds = [tenantId, req.user?.userId || req.user?.id].filter(Boolean);
+            await database_1.default.notification.deleteMany({
+                where: {
+                    role: 'Tenant',
+                    ...(targetIds.length > 0
+                        ? {
+                            OR: [
+                                { targetId: { in: targetIds } },
+                                { userId: { in: targetIds } },
+                                { targetId: null, userId: null },
+                            ],
+                        }
+                        : {}),
+                },
+            });
             return (0, apiResponse_1.sendSuccess)({ res, message: 'All notifications cleared' });
+        }
+        catch (error) {
+            next(error);
+        }
+    }
+    async deleteTenantNotification(req, res, next) {
+        try {
+            const id = String(req.params.id);
+            await database_1.default.notification.deleteMany({
+                where: { id },
+            });
+            return (0, apiResponse_1.sendSuccess)({ res, message: 'Notification deleted' });
         }
         catch (error) {
             next(error);
@@ -1981,6 +2174,8 @@ class PortalController {
                 status: sr.status === 'Open' || sr.status === 'New' || sr.status === 'Submitted' ? 'New' : sr.status === 'InProgress' || sr.status === 'In Progress' ? 'In Progress' : sr.status === 'Completed' ? 'Completed' : sr.status === 'Closed' ? 'Closed' : sr.status === 'Rejected' ? 'Rejected' : sr.status === 'Assigned' ? 'Assigned' : sr.status || 'New',
                 assignedTechnician: sr.assignedVendorName || sr.assignedTechnician || (vendor ? (vendor.contactName || vendor.companyName) : 'Maintenance Staff'),
                 dueDate: sr.scheduledDate || (sr.createdAt ? new Date(sr.createdAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]),
+                scheduledDate: sr.scheduledDate || null,
+                preferredTime: sr.scheduledDate || (sr.notes?.includes('Preferred Visit:') ? sr.notes.replace('Preferred Visit:', '').trim() : null) || (sr.description?.match(/\[Preferred Visit:\s*([^\]]+)\]/)?.[1]) || null,
                 createdAt: sr.createdAt ? new Date(sr.createdAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
                 description: sr.description || '',
                 estimatedCost: sr.estimatedCost || 0,
@@ -1999,7 +2194,7 @@ class PortalController {
                 issue: wo.title,
                 category: wo.title.toLowerCase().includes('hvac') ? 'HVAC' : wo.title.toLowerCase().includes('plumbing') ? 'Plumbing' : 'General',
                 priority: wo.priority === 'Normal' ? 'Medium' : wo.priority || 'Medium',
-                status: wo.status === 'Open' || wo.status === 'Submitted' ? 'New' : wo.status === 'InProgress' ? 'In Progress' : wo.status === 'Completed' ? 'Completed' : wo.status === 'Closed' ? 'Closed' : wo.status === 'Rejected' ? 'Rejected' : wo.status === 'Assigned' ? 'Assigned' : wo.status || 'New',
+                status: wo.status === 'Open' || wo.status === 'Submitted' ? 'New' : (wo.status === 'InProgress' || wo.status === 'In Progress' || wo.status === 'In_Progress') ? 'In Progress' : wo.status === 'Completed' ? 'Completed' : wo.status === 'Closed' ? 'Closed' : wo.status === 'Rejected' ? 'Rejected' : wo.status === 'Assigned' ? 'Assigned' : wo.status || 'New',
                 assignedTechnician: wo.vendor?.contactName || wo.vendor?.companyName || 'Maintenance Staff',
                 dueDate: wo.createdAt ? new Date(wo.createdAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
                 createdAt: wo.createdAt ? new Date(wo.createdAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],

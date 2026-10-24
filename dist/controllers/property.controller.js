@@ -37,12 +37,29 @@ class PropertyController {
             next(error);
         }
     }
+    async bulkImport(req, res, next) {
+        try {
+            const companyId = req.user?.companyId;
+            const properties = Array.isArray(req.body) ? req.body : (req.body?.properties || []);
+            const result = await property_service_1.propertyService.bulkImportProperties(properties, companyId);
+            return (0, apiResponse_1.sendSuccess)({
+                res,
+                statusCode: 201,
+                message: `Successfully imported ${result.count} properties`,
+                data: result,
+            });
+        }
+        catch (error) {
+            next(error);
+        }
+    }
     async delete(req, res, next) {
         try {
             const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
             const companyId = req.user?.companyId;
-            await property_service_1.propertyService.deleteProperty(id, companyId);
-            return (0, apiResponse_1.sendSuccess)({ res, message: 'Property deleted successfully' });
+            const permanent = req.query.permanent === 'true' || req.body?.permanent === true;
+            await property_service_1.propertyService.deleteProperty(id, companyId, permanent);
+            return (0, apiResponse_1.sendSuccess)({ res, message: permanent ? 'Property permanently deleted successfully' : 'Property deleted successfully' });
         }
         catch (error) {
             next(error);

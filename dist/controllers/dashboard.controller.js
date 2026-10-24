@@ -13,25 +13,37 @@ class DashboardController {
             const totalProperties = await database_1.default.property.count({
                 where: {
                     ...(companyId ? { companyId } : {}),
-                    status: { notIn: ['Inactive', 'Draft'] },
+                    status: { notIn: ['Inactive', 'Draft', 'Deleted'] },
                 },
             });
-            const totalUnits = await database_1.default.unit.count({
-                where: companyId ? { property: { companyId, status: { notIn: ['Inactive', 'Draft'] } } } : {},
+            const rawTotalUnits = await database_1.default.unit.count({
+                where: {
+                    property: {
+                        status: { notIn: ['Inactive', 'Deleted'] },
+                        ...(companyId ? { companyId } : {}),
+                    },
+                },
             });
             const occupiedUnits = await database_1.default.unit.count({
                 where: {
                     status: 'Occupied',
-                    ...(companyId ? { property: { companyId } } : {}),
+                    property: {
+                        status: { notIn: ['Inactive', 'Deleted'] },
+                        ...(companyId ? { companyId } : {}),
+                    },
                 },
             });
             const vacantUnits = await database_1.default.unit.count({
                 where: {
                     status: 'Vacant',
-                    ...(companyId ? { property: { companyId } } : {}),
+                    property: {
+                        status: { notIn: ['Inactive', 'Deleted'] },
+                        ...(companyId ? { companyId } : {}),
+                    },
                 },
             });
-            const occupancyRate = totalUnits > 0 ? Math.round((occupiedUnits / totalUnits) * 100) : 0;
+            const totalUnits = Math.max(rawTotalUnits, occupiedUnits + vacantUnits);
+            const occupancyRate = totalUnits > 0 ? Math.min(100, Math.round((occupiedUnits / totalUnits) * 100)) : 0;
             // Sum rentAmount for active leases
             const activeLeases = await database_1.default.lease.findMany({
                 where: {
@@ -51,19 +63,26 @@ class DashboardController {
             // Sum of all recorded actual expenses from database (Expense does not have companyId)
             const dbExpenses = await database_1.default.expense.findMany({});
             const totalExpenses = dbExpenses.reduce((sum, e) => sum + (e.amount || 0), 0);
-            // Open maintenance orders
-            const openMaintenance = await database_1.default.workOrder.count({
+            // Open maintenance orders (both WorkOrders and ServiceRequests)
+            const openWorkOrders = await database_1.default.workOrder.count({
                 where: {
                     status: { in: ['Open', 'InProgress'] },
                     ...(companyId ? { companyId } : {}),
                 },
             });
+            const openServiceRequests = await database_1.default.serviceRequest.count({
+                where: {
+                    status: { in: ['Open', 'InProgress', 'In Progress', 'Pending', 'New', 'Submitted', 'Assigned'] },
+                    ...(companyId ? { companyId } : {}),
+                },
+            });
+            const openMaintenance = openWorkOrders + openServiceRequests;
             const leasesExpiringSoon = await database_1.default.lease.count({
                 where: {
                     status: 'Active',
                     ...(companyId ? { companyId } : {}),
                     endDate: {
-                        lte: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // Next 30 days
+                        lte: new Date(Date.now() + 60 * 24 * 60 * 60 * 1000), // Next 60 days
                     },
                 },
             });

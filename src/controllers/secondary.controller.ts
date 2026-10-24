@@ -155,6 +155,34 @@ export class SecondaryController {
       next(error);
     }
   }
+
+  // 1-to-1 Direct Messaging (Zero Leakage)
+  async getDirectMessages(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+    try {
+      const messages = await secondaryService.getDirectMessages(req.user!);
+      return sendSuccess({ res, data: messages });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async sendDirectMessage(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+    try {
+      const newMsg = await secondaryService.sendDirectMessage(req.user!, req.body);
+      return sendSuccess({ res, statusCode: 201, data: newMsg });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async getDirectContacts(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+    try {
+      const contacts = await secondaryService.getDirectContacts(req.user!);
+      return sendSuccess({ res, data: contacts });
+    } catch (error) {
+      next(error);
+    }
+  }
 }
 
 export const secondaryController = new SecondaryController();

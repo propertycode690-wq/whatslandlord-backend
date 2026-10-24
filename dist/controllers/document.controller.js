@@ -31,7 +31,7 @@ class DocumentController {
             let fileUrl = '';
             try {
                 fileUrl = await new Promise((resolve, reject) => {
-                    const uploadStream = cloudinary_1.default.uploader.upload_stream({ folder: 'owner-documents' }, (error, result) => {
+                    const uploadStream = cloudinary_1.default.uploader.upload_stream({ folder: 'owner-documents', resource_type: 'auto' }, (error, result) => {
                         if (error)
                             return reject(error);
                         resolve(result?.secure_url || '');
@@ -75,7 +75,7 @@ class DocumentController {
             let fileUrl = '';
             try {
                 fileUrl = await new Promise((resolve, reject) => {
-                    const uploadStream = cloudinary_1.default.uploader.upload_stream({ folder: 'tenant-documents' }, (error, result) => {
+                    const uploadStream = cloudinary_1.default.uploader.upload_stream({ folder: 'tenant-documents', resource_type: 'auto' }, (error, result) => {
                         if (error)
                             return reject(error);
                         resolve(result?.secure_url || '');
@@ -127,10 +127,32 @@ class DocumentController {
         try {
             const companyId = req.user?.companyId;
             const docs = await database_1.default.tenantDocument.findMany({
-                where: companyId ? { companyId } : {},
+                where: companyId
+                    ? {
+                        OR: [
+                            { companyId },
+                            { companyId: null },
+                        ],
+                    }
+                    : {},
                 orderBy: { uploadedAt: 'desc' },
             });
-            return (0, apiResponse_1.sendSuccess)({ res, data: docs });
+            const tenantIds = docs.map((d) => d.tenantId).filter(Boolean);
+            let tenantMap = new Map();
+            if (tenantIds.length > 0) {
+                const tenants = await database_1.default.tenant.findMany({
+                    where: { id: { in: tenantIds } },
+                    select: { id: true, firstName: true, lastName: true },
+                });
+                tenants.forEach((t) => {
+                    tenantMap.set(t.id, `${t.firstName || ''} ${t.lastName || ''}`.trim());
+                });
+            }
+            const enrichedDocs = docs.map((d) => ({
+                ...d,
+                tenantName: d.tenantId && tenantMap.has(d.tenantId) ? tenantMap.get(d.tenantId) : 'Resident Tenant',
+            }));
+            return (0, apiResponse_1.sendSuccess)({ res, data: enrichedDocs });
         }
         catch (error) {
             next(error);

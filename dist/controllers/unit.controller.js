@@ -12,11 +12,12 @@ class UnitController {
         try {
             const companyId = req.user?.companyId;
             const units = await database_1.default.unit.findMany({
-                where: companyId ? {
+                where: {
                     property: {
-                        companyId: companyId
-                    }
-                } : {},
+                        status: { notIn: ['Inactive', 'Deleted'] },
+                        ...(companyId ? { companyId } : {}),
+                    },
+                },
                 include: {
                     property: true,
                     building: true,
@@ -52,7 +53,7 @@ class UnitController {
     }
     async create(req, res, next) {
         try {
-            const { propertyId, buildingId, unitNumber, floor, bedrooms, bathrooms, squareFootage, rentAmount, securityDeposit, availabilityDate, status, } = req.body;
+            const { propertyId, buildingId, unitNumber, floor, bedrooms, bathrooms, squareFootage, rentAmount, securityDeposit, availabilityDate, status, isLateFeeEnabled, lateFeeType, lateFeeAmount, lateFeeGraceDays, } = req.body;
             const companyId = req.user?.companyId;
             if (companyId) {
                 const company = await database_1.default.company.findUnique({ where: { id: companyId } });
@@ -154,6 +155,10 @@ class UnitController {
                     securityDeposit: parseFloat(securityDeposit || '0'),
                     availabilityDate: new Date(availabilityDate || Date.now()),
                     status: status || 'Vacant',
+                    isLateFeeEnabled: isLateFeeEnabled !== undefined ? Boolean(isLateFeeEnabled) : false,
+                    lateFeeType: lateFeeType || 'FLAT',
+                    lateFeeAmount: lateFeeAmount !== undefined && lateFeeAmount !== null && lateFeeAmount !== '' ? parseFloat(lateFeeAmount) : null,
+                    lateFeeGraceDays: lateFeeGraceDays !== undefined && lateFeeGraceDays !== null && lateFeeGraceDays !== '' ? parseInt(lateFeeGraceDays) : null,
                 },
             });
             return (0, apiResponse_1.sendSuccess)({ res, statusCode: 201, data: unit });
@@ -166,7 +171,7 @@ class UnitController {
         try {
             const id = req.params.id;
             const companyId = req.user?.companyId;
-            const { propertyId, buildingId, unitNumber, floor, bedrooms, bathrooms, squareFootage, rentAmount, securityDeposit, availabilityDate, status, } = req.body;
+            const { propertyId, buildingId, unitNumber, floor, bedrooms, bathrooms, squareFootage, rentAmount, securityDeposit, availabilityDate, status, isLateFeeEnabled, lateFeeType, lateFeeAmount, lateFeeGraceDays, } = req.body;
             if (companyId) {
                 const check = await database_1.default.unit.findFirst({
                     where: {
@@ -208,6 +213,10 @@ class UnitController {
                     securityDeposit: securityDeposit !== undefined ? parseFloat(securityDeposit) : undefined,
                     availabilityDate: availabilityDate ? new Date(availabilityDate) : undefined,
                     status,
+                    isLateFeeEnabled: isLateFeeEnabled !== undefined ? Boolean(isLateFeeEnabled) : undefined,
+                    lateFeeType: lateFeeType !== undefined ? lateFeeType : undefined,
+                    lateFeeAmount: lateFeeAmount !== undefined ? (lateFeeAmount === '' || lateFeeAmount === null ? null : parseFloat(lateFeeAmount)) : undefined,
+                    lateFeeGraceDays: lateFeeGraceDays !== undefined ? (lateFeeGraceDays === '' || lateFeeGraceDays === null ? null : parseInt(lateFeeGraceDays)) : undefined,
                 },
             });
             return (0, apiResponse_1.sendSuccess)({ res, data: unit });

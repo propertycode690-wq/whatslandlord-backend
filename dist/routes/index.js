@@ -31,6 +31,7 @@ const document_routes_1 = __importDefault(require("./document.routes"));
 const report_routes_1 = __importDefault(require("../reports/routes/report.routes"));
 const integration_routes_1 = __importDefault(require("./integration.routes"));
 const company_routes_1 = __importDefault(require("./company.routes"));
+const restoreBin_routes_1 = __importDefault(require("./restoreBin.routes"));
 const auth_middleware_1 = require("../middlewares/auth.middleware");
 const superadmin_controller_1 = require("../controllers/superadmin.controller");
 const router = (0, express_1.Router)();
@@ -83,5 +84,6 @@ router.use('/inspections', auth_middleware_1.authMiddleware, inspection_routes_1
 router.use('/documents', auth_middleware_1.authMiddleware, document_routes_1.default);
 router.use('/reports', auth_middleware_1.authMiddleware, report_routes_1.default);
 router.use('/integrations', auth_middleware_1.authMiddleware, integration_routes_1.default);
+router.use('/restore-bin', auth_middleware_1.authMiddleware, restoreBin_routes_1.default);
 router.use('/', auth_middleware_1.authMiddleware, secondary_routes_1.default);
 exports.default = router;

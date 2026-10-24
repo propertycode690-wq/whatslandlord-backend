@@ -1,0 +1,11 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const restoreBin_controller_1 = require("../controllers/restoreBin.controller");
+const router = (0, express_1.Router)();
+router.get('/', (req, res, next) => restoreBin_controller_1.restoreBinController.getAll(req, res, next));
+router.post('/', (req, res, next) => restoreBin_controller_1.restoreBinController.softDelete(req, res, next));
+router.post('/:id/restore', (req, res, next) => restoreBin_controller_1.restoreBinController.restore(req, res, next));
+router.delete('/actions/empty', (req, res, next) => restoreBin_controller_1.restoreBinController.emptyBin(req, res, next));
+router.delete('/:id', (req, res, next) => restoreBin_controller_1.restoreBinController.permanentDelete(req, res, next));
+exports.default = router;

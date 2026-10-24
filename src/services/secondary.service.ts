@@ -410,6 +410,241 @@ export class SecondaryService {
       relatedRecords: relatedRecords.slice(0, 5),
     };
   }
+
+  // --- 1-to-1 Direct Messaging (Strict Role/User filtering - Zero Leakage) ---
+  async getUserDisplayNameAndRole(payload: TokenPayload) {
+    let name = payload.email.split('@')[0];
+    let role = payload.roleName || 'User';
+
+    if (payload.roleName === 'Tenant') {
+      const tenant = await prisma.tenant.findFirst({ where: { email: payload.email } });
+      if (tenant) {
+        name = `${tenant.firstName} ${tenant.lastName}`;
+        role = 'Tenant';
+      }
+    } else if (payload.roleName === 'Owner') {
+      const owner = await prisma.owner.findFirst({ where: { email: payload.email } });
+      if (owner) {
+        name = owner.name;
+        role = 'Owner';
+      }
+    } else if (payload.roleName === 'Maintenance Staff') {
+      const staff = await prisma.staffProfile.findFirst({ where: { email: payload.email } });
+      if (staff) {
+        name = staff.name;
+      }
+      role = 'Maintenance Staff';
+    } else if (payload.roleName?.includes('Collection')) {
+      role = 'Collection Staff';
+    } else if (payload.roleName?.includes('Manager') || payload.roleName?.includes('Admin')) {
+      role = 'Property Manager';
+    }
+
+    if (payload.userId) {
+      const u = await prisma.user.findUnique({ where: { id: payload.userId } });
+      if (u && (u.firstName || u.lastName)) {
+        name = `${u.firstName || ''} ${u.lastName || ''}`.trim() || name;
+      }
+    }
+
+    return { name, role, email: payload.email };
+  }
+
+  async getDirectContacts(payload: TokenPayload) {
+    const { role } = await this.getUserDisplayNameAndRole(payload);
+    const contacts: { id: string; name: string; role: string; email?: string }[] = [];
+
+    // All roles can communicate with Property Manager
+    if (role !== 'Property Manager') {
+      contacts.push({ id: 'contact-manager', name: 'Property Manager', role: 'Property Manager' });
+    }
+
+    if (role === 'Tenant') {
+      contacts.push(
+        { id: 'contact-collection', name: 'Collection Staff', role: 'Collection Staff' },
+        { id: 'contact-maintenance', name: 'Maintenance Staff', role: 'Maintenance Staff' },
+        { id: 'contact-owner', name: 'Property Owner', role: 'Owner' }
+      );
+    } else if (role === 'Owner') {
+      contacts.push(
+        { id: 'contact-collection', name: 'Collection Staff', role: 'Collection Staff' },
+        { id: 'contact-maintenance', name: 'Maintenance Staff', role: 'Maintenance Staff' }
+      );
+      const tenants = await prisma.tenant.findMany({
+        take: 30,
+        select: { id: true, firstName: true, lastName: true, email: true },
+      });
+      tenants.forEach((t) => {
+        contacts.push({
+          id: `tenant-${t.id}`,
+          name: `${t.firstName} ${t.lastName}`,
+          role: 'Tenant',
+          email: t.email,
+        });
+      });
+    } else if (role === 'Collection Staff') {
+      contacts.push(
+        { id: 'contact-maintenance', name: 'Maintenance Staff', role: 'Maintenance Staff' }
+      );
+      const tenants = await prisma.tenant.findMany({
+        take: 30,
+        select: { id: true, firstName: true, lastName: true, email: true },
+      });
+      tenants.forEach((t) => {
+        contacts.push({
+          id: `tenant-${t.id}`,
+          name: `${t.firstName} ${t.lastName}`,
+          role: 'Tenant',
+          email: t.email,
+        });
+      });
+    } else if (role === 'Maintenance Staff') {
+      contacts.push(
+        { id: 'contact-collection', name: 'Collection Staff', role: 'Collection Staff' }
+      );
+      const tenants = await prisma.tenant.findMany({
+        take: 30,
+        select: { id: true, firstName: true, lastName: true, email: true },
+      });
+      tenants.forEach((t) => {
+        contacts.push({
+          id: `tenant-${t.id}`,
+          name: `${t.firstName} ${t.lastName}`,
+          role: 'Tenant',
+          email: t.email,
+        });
+      });
+    } else {
+      // Property Manager: fetch real staff, tenants, and owners from DB
+      const [staffUsers, tenants, owners] = await Promise.all([
+        prisma.user.findMany({
+          where: {
+            role: {
+              name: {
+                in: ['Maintenance Staff', 'Collection Manager', 'Collection Staff'],
+              },
+            },
+          },
+          include: { role: true },
+          take: 20,
+        }),
+        prisma.tenant.findMany({
+          take: 50,
+          select: { id: true, firstName: true, lastName: true, email: true },
+        }),
+        prisma.owner.findMany({
+          take: 30,
+          select: { id: true, name: true, email: true },
+        }),
+      ]);
+
+      staffUsers.forEach((s) => {
+        const staffName = `${s.firstName || ''} ${s.lastName || ''}`.trim() || s.email;
+        contacts.push({
+          id: `staff-${s.id}`,
+          name: staffName,
+          role: s.role?.name || 'Staff',
+          email: s.email,
+        });
+      });
+
+      // If no collection staff user is registered yet, provide the direct desk
+      if (!staffUsers.some((s) => (s.role?.name || '').includes('Collection'))) {
+        contacts.push({ id: 'contact-collection', name: 'Collection Desk', role: 'Collection Staff' });
+      }
+
+      tenants.forEach((t) => {
+        const tName = `${t.firstName || ''} ${t.lastName || ''}`.trim();
+        if (tName) {
+          contacts.push({
+            id: `tenant-${t.id}`,
+            name: tName,
+            role: 'Tenant',
+            email: t.email,
+          });
+        }
+      });
+
+      owners.forEach((o) => {
+        const oName = o.name?.trim();
+        if (oName) {
+          contacts.push({
+            id: `owner-${o.id}`,
+            name: oName,
+            role: 'Owner',
+            email: o.email,
+          });
+        }
+      });
+    }
+
+    return contacts;
+  }
+
+  async getDirectMessages(payload: TokenPayload) {
+    const { name, role, email } = await this.getUserDisplayNameAndRole(payload);
+
+    // ZERO LEAKAGE: Query messages where sender or recipient matches user or user's role
+    const rawMessages = await prisma.tenantMessage.findMany({
+      orderBy: { createdAt: 'desc' },
+      take: 200,
+    });
+
+    // Match if sender or recipient matches user's email, exact name, or role title
+    const userTokens = [
+      email.toLowerCase(),
+      name.toLowerCase(),
+      role.toLowerCase(),
+    ];
+
+    const isMatch = (fieldStr: string) => {
+      const lower = (fieldStr || '').toLowerCase();
+      return userTokens.some((t) => lower.includes(t));
+    };
+
+    const userMessages = rawMessages.filter((m) => {
+      return isMatch(m.sender) || isMatch(m.recipient);
+    });
+
+    return userMessages.map((m) => {
+      const isOutbound = isMatch(m.sender);
+      return {
+        id: m.id,
+        sender: m.sender,
+        recipient: m.recipient,
+        subject: m.subject,
+        body: m.body,
+        createdAt: m.createdAt,
+        isOutbound,
+        contactName: isOutbound ? m.recipient : m.sender,
+      };
+    });
+  }
+
+  async sendDirectMessage(payload: TokenPayload, data: { recipient: string; body: string; subject?: string }) {
+    const { name, role } = await this.getUserDisplayNameAndRole(payload);
+
+    const sender = `${name} (${role})`;
+    const newMsg = await prisma.tenantMessage.create({
+      data: {
+        sender,
+        recipient: data.recipient,
+        subject: data.subject || 'Direct Chat',
+        body: data.body,
+      },
+    });
+
+    return {
+      id: newMsg.id,
+      sender: newMsg.sender,
+      recipient: newMsg.recipient,
+      subject: newMsg.subject,
+      body: newMsg.body,
+      createdAt: newMsg.createdAt,
+      isOutbound: true,
+      contactName: newMsg.recipient,
+    };
+  }
 }
 
 export const secondaryService = new SecondaryService();

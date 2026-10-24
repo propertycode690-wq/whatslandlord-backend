@@ -87,7 +87,8 @@ class PaymentController {
     async getActiveGateway(req, res, next) {
         try {
             const companyId = req.user?.companyId;
-            const gateway = await payment_service_1.paymentService.getActiveGateway(companyId);
+            const propertyId = req.query.propertyId;
+            const gateway = await payment_service_1.paymentService.getActiveGateway(companyId, propertyId, req.user);
             return (0, apiResponse_1.sendSuccess)({ res, data: gateway });
         }
         catch (error) {
@@ -97,8 +98,8 @@ class PaymentController {
     async createRazorpayOrder(req, res, next) {
         try {
             const companyId = req.user?.companyId;
-            const { amount, currency } = req.body;
-            const order = await payment_service_1.paymentService.createRazorpayOrder(Number(amount), currency || 'USD', companyId);
+            const { amount, currency, propertyId } = req.body;
+            const order = await payment_service_1.paymentService.createRazorpayOrder(Number(amount), currency || 'USD', companyId, propertyId);
             return (0, apiResponse_1.sendSuccess)({ res, data: order });
         }
         catch (error) {
@@ -108,13 +109,14 @@ class PaymentController {
     async verifyRazorpayPayment(req, res, next) {
         try {
             const companyId = req.user?.companyId;
-            const { razorpayOrderId, razorpayPaymentId, razorpaySignature, amount } = req.body;
+            const { razorpayOrderId, razorpayPaymentId, razorpaySignature, amount, propertyId } = req.body;
             const result = await payment_service_1.paymentService.verifyRazorpayPayment({
                 razorpayOrderId,
                 razorpayPaymentId,
                 razorpaySignature,
                 amount: Number(amount),
                 companyId,
+                propertyId,
                 userEmail: req.user?.email,
                 userRole: req.user?.roleName || req.user?.role,
             });

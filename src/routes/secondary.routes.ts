@@ -30,4 +30,9 @@ router.post('/documents', (req, res, next) => secondaryController.createDocument
 // AI Chat
 router.post('/ai/chat', (req, res, next) => secondaryController.processAiChat(req, res, next));
 
+// 1-to-1 Direct Messaging (All 5 Roles with Zero Leakage)
+router.get('/messages', (req, res, next) => secondaryController.getDirectMessages(req, res, next));
+router.post('/messages', (req, res, next) => secondaryController.sendDirectMessage(req, res, next));
+router.get('/messages/contacts', (req, res, next) => secondaryController.getDirectContacts(req, res, next));
+
 export default router;

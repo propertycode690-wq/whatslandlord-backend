@@ -40,6 +40,62 @@ async function bootstrapDb() {
                 }
             });
         }
+        // Ensure restore_bin table exists
+        await database_1.default.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS restore_bin (
+        id VARCHAR(191) PRIMARY KEY,
+        entityType VARCHAR(100) NOT NULL,
+        entityId VARCHAR(191) NOT NULL,
+        title VARCHAR(255) NOT NULL,
+        subtitle VARCHAR(255) NULL,
+        data LONGTEXT NOT NULL,
+        deletedBy VARCHAR(191) NULL,
+        companyId VARCHAR(191) NULL,
+        createdAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+        deletedAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+        INDEX idx_rb_company (companyId),
+        INDEX idx_rb_entity (entityType, entityId)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `).catch((e) => {
+            logger_1.logger.warn(`restore_bin table init warning: ${e.message}`);
+        });
+        // Clean up unwanted seeded mock Chart of Accounts from database
+        const mockCoA = await database_1.default.coAAccount.findMany({
+            where: {
+                accountName: {
+                    in: [
+                        'Operating Checking Account',
+                        'Security Deposit Escrow Account',
+                        'Accounts Payable (AP)',
+                        'Tenant Security Deposit Liability',
+                        "Owner's Equity Capital",
+                        'Rental Revenue Income',
+                        'Maintenance & Repair Expense',
+                    ],
+                },
+            },
+        });
+        if (mockCoA.length > 0) {
+            const mockIds = mockCoA.map((a) => a.id);
+            await database_1.default.journalEntryLine.deleteMany({ where: { accountId: { in: mockIds } } });
+            await database_1.default.coAAccount.deleteMany({ where: { id: { in: mockIds } } });
+            logger_1.logger.info(`🧹 Cleaned up ${mockCoA.length} seeded mock Chart of Accounts from database.`);
+        }
+        const existingRohit = await database_1.default.owner.findFirst({ where: { email: 'rohit@example.com' } });
+        if (!existingRohit) {
+            const firstCompany = await database_1.default.company.findFirst();
+            await database_1.default.owner.create({
+                data: {
+                    id: '584ff4e1-7950-4d89-9884-2a62372fbfb0',
+                    name: 'rohit',
+                    email: 'rohit@example.com',
+                    phone: '1223345343',
+                    payoutMethod: 'Check',
+                    companyId: firstCompany?.id || null,
+                },
+            }).catch(() => { });
+            logger_1.logger.info('✅ Restored owner rohit into database.');
+        }
         logger_1.logger.info('✅ Database schema bootstrap completed.');
     }
     catch (error) {

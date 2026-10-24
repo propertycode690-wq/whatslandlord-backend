@@ -57,14 +57,57 @@ class SecondaryService {
         });
     }
     // Notifications
-    async getNotifications(companyId, role) {
+    buildNotificationWhere(companyId, role, userContext) {
         const whereClause = {};
         if (companyId) {
-            whereClause.companyId = companyId;
+            whereClause.OR = [{ companyId }, { companyId: null }];
         }
         if (role) {
-            whereClause.role = role;
+            const lower = role.toLowerCase().trim();
+            if (lower.includes('tenant')) {
+                whereClause.role = 'Tenant';
+                const targetIds = [userContext?.tenantId, userContext?.id].filter(Boolean);
+                if (targetIds.length > 0) {
+                    whereClause.AND = [
+                        {
+                            OR: [
+                                { targetId: { in: targetIds } },
+                                { userId: { in: targetIds } },
+                                { targetId: null, userId: null },
+                            ],
+                        },
+                    ];
+                }
+            }
+            else if (lower.includes('owner')) {
+                whereClause.role = 'Owner';
+                if (userContext?.ownerId || userContext?.id) {
+                    const ownerIds = [userContext.ownerId, userContext.id].filter(Boolean);
+                    whereClause.AND = [
+                        {
+                            OR: [
+                                { targetId: { in: ownerIds } },
+                                { userId: { in: ownerIds } },
+                                { targetId: null, userId: null },
+                            ],
+                        },
+                    ];
+                }
+            }
+            else if (lower.includes('maintenance')) {
+                whereClause.role = { in: ['Maintenance Staff', 'Staff'] };
+            }
+            else if (lower.includes('collection')) {
+                whereClause.role = 'Collection Manager';
+            }
+            else {
+                whereClause.role = { in: ['Property Manager', 'Manager', 'Super Admin'] };
+            }
         }
+        return whereClause;
+    }
+    async getNotifications(companyId, role, userContext) {
+        const whereClause = this.buildNotificationWhere(companyId, role, userContext);
         return database_1.default.notification.findMany({
             where: whereClause,
             orderBy: { createdAt: 'desc' },
@@ -76,21 +119,15 @@ class SecondaryService {
             data: { read: true },
         });
     }
-    async markAllNotificationsRead(companyId, role) {
-        const whereClause = companyId ? { companyId } : {};
-        if (role) {
-            whereClause.role = role;
-        }
+    async markAllNotificationsRead(companyId, role, userContext) {
+        const whereClause = this.buildNotificationWhere(companyId, role, userContext);
         return database_1.default.notification.updateMany({
             where: whereClause,
             data: { read: true },
         });
     }
-    async clearNotifications(companyId, role) {
-        const whereClause = companyId ? { companyId } : {};
-        if (role) {
-            whereClause.role = role;
-        }
+    async clearNotifications(companyId, role, userContext) {
+        const whereClause = this.buildNotificationWhere(companyId, role, userContext);
         return database_1.default.notification.deleteMany({
             where: whereClause,
         });
@@ -143,6 +180,7 @@ class SecondaryService {
         let occupancyRateVal = 0;
         let tenantsCount = 0;
         let leasesCount = 0;
+        let expiringLeasesCount = 0;
         let overduePaymentsCount = 0;
         let overdueTotalAmount = 0;
         let overdueTenantDetails = '';
@@ -196,16 +234,24 @@ class SecondaryService {
             // --- MANAGER / STAFF DATA SCOPING (STRICT BY COMPANY ID) ---
             const companyFilter = companyId ? { companyId } : {};
             const unitWhere = companyId ? { property: { companyId } } : {};
-            const [properties, totalUnits, occupiedUnits, activeTenantsCount, activeLeasesCount, overduePayments, openWorkOrders, owners,] = await Promise.all([
+            const startOfMonth = new Date();
+            startOfMonth.setDate(1);
+            startOfMonth.setHours(0, 0, 0, 0);
+            const endOfMonth = new Date(startOfMonth);
+            endOfMonth.setMonth(endOfMonth.getMonth() + 1);
+            const [properties, totalUnits, occupiedUnits, activeTenantsCount, activeLeasesCount, expiringLeasesDataCount, overdueInvoices, openWorkOrdersCount, openWorkOrdersList, owners,] = await Promise.all([
                 database_1.default.property.findMany({ where: companyFilter, select: { id: true, name: true, unitsCount: true } }),
                 database_1.default.unit.count({ where: unitWhere }),
                 database_1.default.unit.count({ where: { ...unitWhere, status: 'Occupied' } }),
                 database_1.default.tenant.count({ where: companyFilter }),
                 database_1.default.lease.count({ where: { ...companyFilter, status: 'Active' } }),
-                database_1.default.rentPayment.findMany({
-                    where: { ...companyFilter, status: 'Pending' },
-                    include: { tenant: { select: { firstName: true, lastName: true } }, property: { select: { name: true } } },
-                    take: 5,
+                database_1.default.lease.count({ where: { ...companyFilter, status: 'Active', endDate: { gte: startOfMonth, lt: endOfMonth } } }),
+                database_1.default.invoice.findMany({
+                    where: { ...companyFilter, status: { in: ['Overdue', 'Unpaid'] } },
+                    include: { tenant: { select: { firstName: true, lastName: true } } },
+                }),
+                database_1.default.workOrder.count({
+                    where: { ...companyFilter, status: 'Open' },
                 }),
                 database_1.default.workOrder.findMany({
                     where: { ...companyFilter, status: 'Open' },
@@ -227,13 +273,17 @@ class SecondaryService {
             occupancyRateVal = totalUnits > 0 ? Math.round((occupiedUnits / totalUnits) * 100) : 0;
             tenantsCount = activeTenantsCount;
             leasesCount = activeLeasesCount;
-            overduePaymentsCount = overduePayments.length;
-            overdueTotalAmount = overduePayments.reduce((sum, p) => sum + (p.amount || 0), 0);
-            overdueTenantDetails = overduePayments
-                .map((p) => `${p.tenant?.firstName || ''} ${p.tenant?.lastName || ''} ($${p.amount})`)
-                .join(', ');
-            workOrdersCount = openWorkOrders.length;
-            scopedContextText = `User Role: ${userRole} (Company ID: ${companyId || 'Global'}). Company Owners (${ownersCount}): [${ownerNames || 'None'}]. Portfolio: ${propertiesCount} Properties ([${propertyNames || 'None'}]), ${totalUnitsCount} Total Units (${occupiedUnitsCount} Occupied, ${vacantUnitsCount} Vacant, ${occupancyRateVal}% Occupancy Rate), ${tenantsCount} Active Tenants, ${leasesCount} Active Leases. Overdue Rent: ${overduePaymentsCount} tenants owing total $${overdueTotalAmount} (${overdueTenantDetails || 'None'}). Open Work Orders: ${workOrdersCount} pending.`;
+            expiringLeasesCount = expiringLeasesDataCount;
+            overduePaymentsCount = overdueInvoices.length;
+            overdueTotalAmount = overdueInvoices.reduce((sum, inv) => sum + (inv.balance || inv.amount || 0), 0);
+            overdueTenantDetails = overdueInvoices
+                .slice(0, 5) // Limit the details string to 5 to keep the prompt size reasonable
+                .map((inv) => `${inv.tenant?.firstName || ''} ${inv.tenant?.lastName || ''} ($${inv.balance || inv.amount || 0})`)
+                .filter(Boolean)
+                .join(', ') + (overduePaymentsCount > 5 ? ' and more' : '');
+            workOrdersCount = openWorkOrdersCount;
+            const workOrderDetails = openWorkOrdersList.map(wo => `${wo.title} (${wo.priority})`).join(', ');
+            scopedContextText = `User Role: ${userRole} (Company ID: ${companyId || 'Global'}). Company Owners (${ownersCount}): [${ownerNames || 'None'}]. Portfolio: ${propertiesCount} Properties ([${propertyNames || 'None'}]), ${totalUnitsCount} Total Units (${occupiedUnitsCount} Occupied, ${vacantUnitsCount} Vacant, ${occupancyRateVal}% Occupancy Rate), ${tenantsCount} Active Tenants, ${leasesCount} Active Leases (${expiringLeasesCount} expiring this month). Overdue Rent: ${overduePaymentsCount} tenants owing total $${overdueTotalAmount} (${overdueTenantDetails || 'None'}). Open Work Orders: ${workOrdersCount} pending (${workOrderDetails || 'None'}).`;
             suggestedActions = ['Show Overdue Rent Details', 'View Vacant Units', 'Check Maintenance Requests', 'Generate Rent Roll'];
             relatedRecords = properties.map((p) => `Property: ${p.name}`);
         }
@@ -304,7 +354,7 @@ class SecondaryService {
                     : `Maintenance Work Orders: All clear! There are no open maintenance work orders pending right now.`;
             }
             else if (q.includes('tenant') || q.includes('resident') || q.includes('lease')) {
-                responseText = `Tenants & Leases Overview: Your company has ${tenantsCount} active tenants and ${leasesCount} active leases on file.`;
+                responseText = `Tenants & Leases Overview: Your company has ${tenantsCount} active tenants and ${leasesCount} active leases on file (${expiringLeasesCount} expiring this month).`;
             }
             else if (q.includes('financial') || q.includes('revenue') || q.includes('report') || q.includes('statement')) {
                 responseText = `Financial Metrics: Live double-entry accounting records are active. Total overdue rent outstanding is $${overdueTotalAmount} across ${overduePaymentsCount} delinquent accounts.`;
@@ -332,6 +382,217 @@ class SecondaryService {
             response: responseText,
             suggestedActions,
             relatedRecords: relatedRecords.slice(0, 5),
+        };
+    }
+    // --- 1-to-1 Direct Messaging (Strict Role/User filtering - Zero Leakage) ---
+    async getUserDisplayNameAndRole(payload) {
+        let name = payload.email.split('@')[0];
+        let role = payload.roleName || 'User';
+        if (payload.roleName === 'Tenant') {
+            const tenant = await database_1.default.tenant.findFirst({ where: { email: payload.email } });
+            if (tenant) {
+                name = `${tenant.firstName} ${tenant.lastName}`;
+                role = 'Tenant';
+            }
+        }
+        else if (payload.roleName === 'Owner') {
+            const owner = await database_1.default.owner.findFirst({ where: { email: payload.email } });
+            if (owner) {
+                name = owner.name;
+                role = 'Owner';
+            }
+        }
+        else if (payload.roleName === 'Maintenance Staff') {
+            const staff = await database_1.default.staffProfile.findFirst({ where: { email: payload.email } });
+            if (staff) {
+                name = staff.name;
+            }
+            role = 'Maintenance Staff';
+        }
+        else if (payload.roleName?.includes('Collection')) {
+            role = 'Collection Staff';
+        }
+        else if (payload.roleName?.includes('Manager') || payload.roleName?.includes('Admin')) {
+            role = 'Property Manager';
+        }
+        if (payload.userId) {
+            const u = await database_1.default.user.findUnique({ where: { id: payload.userId } });
+            if (u && (u.firstName || u.lastName)) {
+                name = `${u.firstName || ''} ${u.lastName || ''}`.trim() || name;
+            }
+        }
+        return { name, role, email: payload.email };
+    }
+    async getDirectContacts(payload) {
+        const { role } = await this.getUserDisplayNameAndRole(payload);
+        const contacts = [];
+        // All roles can communicate with Property Manager
+        if (role !== 'Property Manager') {
+            contacts.push({ id: 'contact-manager', name: 'Property Manager', role: 'Property Manager' });
+        }
+        if (role === 'Tenant') {
+            contacts.push({ id: 'contact-collection', name: 'Collection Staff', role: 'Collection Staff' }, { id: 'contact-maintenance', name: 'Maintenance Staff', role: 'Maintenance Staff' }, { id: 'contact-owner', name: 'Property Owner', role: 'Owner' });
+        }
+        else if (role === 'Owner') {
+            contacts.push({ id: 'contact-collection', name: 'Collection Staff', role: 'Collection Staff' }, { id: 'contact-maintenance', name: 'Maintenance Staff', role: 'Maintenance Staff' });
+            const tenants = await database_1.default.tenant.findMany({
+                take: 30,
+                select: { id: true, firstName: true, lastName: true, email: true },
+            });
+            tenants.forEach((t) => {
+                contacts.push({
+                    id: `tenant-${t.id}`,
+                    name: `${t.firstName} ${t.lastName}`,
+                    role: 'Tenant',
+                    email: t.email,
+                });
+            });
+        }
+        else if (role === 'Collection Staff') {
+            contacts.push({ id: 'contact-maintenance', name: 'Maintenance Staff', role: 'Maintenance Staff' });
+            const tenants = await database_1.default.tenant.findMany({
+                take: 30,
+                select: { id: true, firstName: true, lastName: true, email: true },
+            });
+            tenants.forEach((t) => {
+                contacts.push({
+                    id: `tenant-${t.id}`,
+                    name: `${t.firstName} ${t.lastName}`,
+                    role: 'Tenant',
+                    email: t.email,
+                });
+            });
+        }
+        else if (role === 'Maintenance Staff') {
+            contacts.push({ id: 'contact-collection', name: 'Collection Staff', role: 'Collection Staff' });
+            const tenants = await database_1.default.tenant.findMany({
+                take: 30,
+                select: { id: true, firstName: true, lastName: true, email: true },
+            });
+            tenants.forEach((t) => {
+                contacts.push({
+                    id: `tenant-${t.id}`,
+                    name: `${t.firstName} ${t.lastName}`,
+                    role: 'Tenant',
+                    email: t.email,
+                });
+            });
+        }
+        else {
+            // Property Manager: fetch real staff, tenants, and owners from DB
+            const [staffUsers, tenants, owners] = await Promise.all([
+                database_1.default.user.findMany({
+                    where: {
+                        role: {
+                            name: {
+                                in: ['Maintenance Staff', 'Collection Manager', 'Collection Staff'],
+                            },
+                        },
+                    },
+                    include: { role: true },
+                    take: 20,
+                }),
+                database_1.default.tenant.findMany({
+                    take: 50,
+                    select: { id: true, firstName: true, lastName: true, email: true },
+                }),
+                database_1.default.owner.findMany({
+                    take: 30,
+                    select: { id: true, name: true, email: true },
+                }),
+            ]);
+            staffUsers.forEach((s) => {
+                const staffName = `${s.firstName || ''} ${s.lastName || ''}`.trim() || s.email;
+                contacts.push({
+                    id: `staff-${s.id}`,
+                    name: staffName,
+                    role: s.role?.name || 'Staff',
+                    email: s.email,
+                });
+            });
+            // If no collection staff user is registered yet, provide the direct desk
+            if (!staffUsers.some((s) => (s.role?.name || '').includes('Collection'))) {
+                contacts.push({ id: 'contact-collection', name: 'Collection Desk', role: 'Collection Staff' });
+            }
+            tenants.forEach((t) => {
+                const tName = `${t.firstName || ''} ${t.lastName || ''}`.trim();
+                if (tName) {
+                    contacts.push({
+                        id: `tenant-${t.id}`,
+                        name: tName,
+                        role: 'Tenant',
+                        email: t.email,
+                    });
+                }
+            });
+            owners.forEach((o) => {
+                const oName = o.name?.trim();
+                if (oName) {
+                    contacts.push({
+                        id: `owner-${o.id}`,
+                        name: oName,
+                        role: 'Owner',
+                        email: o.email,
+                    });
+                }
+            });
+        }
+        return contacts;
+    }
+    async getDirectMessages(payload) {
+        const { name, role, email } = await this.getUserDisplayNameAndRole(payload);
+        // ZERO LEAKAGE: Query messages where sender or recipient matches user or user's role
+        const rawMessages = await database_1.default.tenantMessage.findMany({
+            orderBy: { createdAt: 'desc' },
+            take: 200,
+        });
+        // Match if sender or recipient matches user's email, exact name, or role title
+        const userTokens = [
+            email.toLowerCase(),
+            name.toLowerCase(),
+            role.toLowerCase(),
+        ];
+        const isMatch = (fieldStr) => {
+            const lower = (fieldStr || '').toLowerCase();
+            return userTokens.some((t) => lower.includes(t));
+        };
+        const userMessages = rawMessages.filter((m) => {
+            return isMatch(m.sender) || isMatch(m.recipient);
+        });
+        return userMessages.map((m) => {
+            const isOutbound = isMatch(m.sender);
+            return {
+                id: m.id,
+                sender: m.sender,
+                recipient: m.recipient,
+                subject: m.subject,
+                body: m.body,
+                createdAt: m.createdAt,
+                isOutbound,
+                contactName: isOutbound ? m.recipient : m.sender,
+            };
+        });
+    }
+    async sendDirectMessage(payload, data) {
+        const { name, role } = await this.getUserDisplayNameAndRole(payload);
+        const sender = `${name} (${role})`;
+        const newMsg = await database_1.default.tenantMessage.create({
+            data: {
+                sender,
+                recipient: data.recipient,
+                subject: data.subject || 'Direct Chat',
+                body: data.body,
+            },
+        });
+        return {
+            id: newMsg.id,
+            sender: newMsg.sender,
+            recipient: newMsg.recipient,
+            subject: newMsg.subject,
+            body: newMsg.body,
+            createdAt: newMsg.createdAt,
+            isOutbound: true,
+            contactName: newMsg.recipient,
         };
     }
 }

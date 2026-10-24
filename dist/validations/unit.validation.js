@@ -25,6 +25,10 @@ exports.createUnitSchema = zod_1.z.object({
         securityDeposit: (0, validationHelpers_1.safeNumberSchema)(zod_1.z.number().min(0, 'Security deposit cannot be negative')).default(0),
         availabilityDate: (0, validationHelpers_1.safeDateSchema)().default(() => new Date()),
         status: unitStatusEnum.default('Vacant'),
+        isLateFeeEnabled: zod_1.z.boolean().optional().default(false),
+        lateFeeType: zod_1.z.enum(['FLAT', 'PERCENTAGE']).optional().default('FLAT'),
+        lateFeeAmount: (0, validationHelpers_1.safeNumberSchema)(zod_1.z.number().min(0)).optional().nullable(),
+        lateFeeGraceDays: (0, validationHelpers_1.safeNumberSchema)(zod_1.z.number().int().min(0)).optional().nullable(),
     }),
 });
 exports.updateUnitSchema = zod_1.z.object({
@@ -43,5 +47,9 @@ exports.updateUnitSchema = zod_1.z.object({
         securityDeposit: (0, validationHelpers_1.safeNumberSchema)(zod_1.z.number().min(0, 'Security deposit cannot be negative')).optional(),
         availabilityDate: (0, validationHelpers_1.safeDateSchema)().optional(),
         status: unitStatusEnum.optional(),
+        isLateFeeEnabled: zod_1.z.boolean().optional(),
+        lateFeeType: zod_1.z.enum(['FLAT', 'PERCENTAGE']).optional(),
+        lateFeeAmount: (0, validationHelpers_1.safeNumberSchema)(zod_1.z.number().min(0)).optional().nullable(),
+        lateFeeGraceDays: (0, validationHelpers_1.safeNumberSchema)(zod_1.z.number().int().min(0)).optional().nullable(),
     }),
 });

@@ -8,10 +8,11 @@ const database_1 = __importDefault(require("../config/database"));
 const appError_1 = require("../utils/appError");
 class AccountingService {
     async getChartOfAccounts(companyId) {
-        return database_1.default.coAAccount.findMany({
+        const accounts = await database_1.default.coAAccount.findMany({
             where: companyId ? { companyId } : {},
             orderBy: { accountCode: 'asc' },
         });
+        return accounts;
     }
     async createAccount(data, companyId) {
         const existing = await database_1.default.coAAccount.findFirst({
@@ -36,12 +37,15 @@ class AccountingService {
             if (!check)
                 throw new appError_1.AppError('Account not found.', 404);
         }
+        await database_1.default.journalEntryLine.deleteMany({
+            where: { accountId: id },
+        });
         return database_1.default.coAAccount.delete({
             where: { id },
         });
     }
     async getJournalEntries(companyId) {
-        return database_1.default.journalEntry.findMany({
+        const entries = await database_1.default.journalEntry.findMany({
             where: companyId ? { companyId } : {},
             include: {
                 lines: {
@@ -52,9 +56,10 @@ class AccountingService {
             },
             orderBy: { date: 'desc' },
         });
+        return entries;
     }
     async getGeneralLedger(companyId) {
-        return database_1.default.journalEntryLine.findMany({
+        const ledger = await database_1.default.journalEntryLine.findMany({
             where: companyId ? {
                 journalEntry: { companyId }
             } : {},
@@ -68,12 +73,14 @@ class AccountingService {
                 },
             },
         });
+        return ledger;
     }
     async getBankAccounts(companyId) {
-        return database_1.default.bankAccount.findMany({
+        const accounts = await database_1.default.bankAccount.findMany({
             where: companyId ? { companyId } : {},
             orderBy: { name: 'asc' },
         });
+        return accounts;
     }
     async createBankAccount(data, companyId) {
         return database_1.default.bankAccount.create({

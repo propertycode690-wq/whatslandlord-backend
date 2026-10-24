@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.serviceRequestController = void 0;
 const database_1 = __importDefault(require("../config/database"));
 const apiResponse_1 = require("../utils/apiResponse");
+const notification_helper_1 = require("../services/notification.helper");
 class ServiceRequestController {
     async getAll(req, res, next) {
         try {
@@ -191,6 +192,28 @@ class ServiceRequestController {
                     messages: '[]',
                     companyId,
                 },
+            });
+            // Dispatch Notifications
+            await (0, notification_helper_1.createNotification)({
+                title: 'New Service Request',
+                message: `Request "${title || 'Maintenance'}" submitted by ${tenantName || 'Resident'} for ${propertyName || 'Property'} (Unit ${unitNumber || 'N/A'})`,
+                role: 'Property Manager',
+                companyId,
+                targetId: request.id,
+            });
+            await (0, notification_helper_1.createNotification)({
+                title: 'New Service Request Logged',
+                message: `${priority || 'Normal'} priority: "${title || 'Maintenance'}" at ${propertyName || 'Property'} Unit ${unitNumber || 'N/A'}`,
+                role: 'Maintenance Staff',
+                companyId,
+                targetId: request.id,
+            });
+            await (0, notification_helper_1.createNotification)({
+                title: 'Request Received',
+                message: `Your maintenance request "${title || 'Maintenance'}" has been logged successfully.`,
+                role: 'Tenant',
+                companyId,
+                targetId: tenantId || req.user?.userId || req.user?.id,
             });
             return (0, apiResponse_1.sendSuccess)({ res, statusCode: 201, data: { ...request, messages: [], requestNumber: `SR-${Date.now()}` } });
         }
