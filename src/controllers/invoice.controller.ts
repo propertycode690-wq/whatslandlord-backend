@@ -33,19 +33,61 @@ class InvoiceController {
       let invoices = await prisma.invoice.findMany({
         where: whereClause,
         include: {
-          tenant: true,
+          tenant: {
+            include: {
+              unit: {
+                include: {
+                  property: true,
+                },
+              },
+              leases: {
+                include: {
+                  property: true,
+                  unit: true,
+                },
+              },
+            },
+          },
         },
         orderBy: { createdAt: 'desc' },
       });
 
+      const formatted = invoices.map((inv: any) => {
+        let tName = inv.tenantName;
+        let pName = inv.propertyName;
+        let uNum = inv.unitNumber;
+        let pId = inv.propertyId;
 
-      const formatted = invoices.map((inv: any) => ({
-        ...inv,
-        dueDate: inv.dueDate || '',
-        lineItems: (() => {
-          try { return JSON.parse(inv.lineItems as string); } catch { return []; }
-        })(),
-      }));
+        if (inv.tenant) {
+          const fullName = `${inv.tenant.firstName || ''} ${inv.tenant.lastName || ''}`.trim();
+          if ((!tName || tName === 'Unknown Tenant') && fullName) {
+            tName = fullName;
+          }
+          const prop = inv.tenant.unit?.property || inv.tenant.leases?.[0]?.property;
+          const unit = inv.tenant.unit || inv.tenant.leases?.[0]?.unit;
+          if ((!pName || pName === 'Unknown Property') && prop?.name) {
+            pName = prop.name;
+          }
+          if ((!pId || pId === 'default') && prop?.id) {
+            pId = prop.id;
+          }
+          if ((!uNum || uNum === '') && unit?.unitNumber) {
+            uNum = unit.unitNumber;
+          }
+        }
+
+        return {
+          ...inv,
+          tenantName: tName || inv.tenantName || 'Unknown Tenant',
+          propertyName: pName || inv.propertyName || 'Unknown Property',
+          unitNumber: uNum || inv.unitNumber || '',
+          propertyId: pId || inv.propertyId || 'default',
+          dueDate: inv.dueDate || '',
+          lineItems: (() => {
+            try { return JSON.parse(inv.lineItems as string); } catch { return []; }
+          })(),
+        };
+      });
 
       return sendSuccess({ res, data: formatted });
     } catch (error) {
@@ -55,12 +97,53 @@ class InvoiceController {
 
   async create(req: AuthenticatedRequest, res: Response, next: NextFunction) {
     try {
-      const {
+      let {
         tenantId, tenantName, propertyId, propertyName,
         unitNumber, dueDate, amount, paidAmount, balance,
         status, lineItems, notes,
       } = req.body;
       const companyId = req.user?.companyId;
+
+      if (tenantId && (!tenantName || tenantName === 'Unknown Tenant' || !propertyName || propertyName === 'Unknown Property' || !unitNumber)) {
+        try {
+          const tenant = await prisma.tenant.findUnique({
+            where: { id: tenantId },
+            include: {
+              unit: {
+                include: {
+                  property: true,
+                },
+              },
+              leases: {
+                include: {
+                  property: true,
+                  unit: true,
+                },
+              },
+            },
+          });
+
+          if (tenant) {
+            if (!tenantName || tenantName === 'Unknown Tenant') {
+              const fullName = `${tenant.firstName || ''} ${tenant.lastName || ''}`.trim();
+              if (fullName) tenantName = fullName;
+            }
+            const prop = tenant.unit?.property || tenant.leases?.[0]?.property;
+            const unit = tenant.unit || tenant.leases?.[0]?.unit;
+            if ((!propertyName || propertyName === 'Unknown Property') && prop?.name) {
+              propertyName = prop.name;
+            }
+            if ((!propertyId || propertyId === 'default') && (prop?.id || tenant.unit?.propertyId)) {
+              propertyId = prop?.id || tenant.unit?.propertyId || 'default';
+            }
+            if ((!unitNumber || unitNumber === '') && unit?.unitNumber) {
+              unitNumber = unit.unitNumber;
+            }
+          }
+        } catch (lookupErr) {
+          console.warn('Tenant lookup during invoice creation warning:', lookupErr);
+        }
+      }
 
       const parsedDueDate = dueDate ? new Date(dueDate) : new Date();
 
