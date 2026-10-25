@@ -278,15 +278,23 @@ class WorkOrderController {
         try {
             const id = req.params['id'];
             const companyId = req.user?.companyId;
-            if (companyId) {
-                const check = await database_js_1.default.workOrder.findFirst({
-                    where: { id, companyId },
-                });
-                if (!check)
-                    throw new Error('WorkOrder not found.');
+            // 1. Try finding and deleting from WorkOrder
+            const woCheck = await database_js_1.default.workOrder.findFirst({
+                where: companyId ? { id, companyId } : { id },
+            });
+            if (woCheck) {
+                await database_js_1.default.workOrder.delete({ where: { id } });
+                return (0, apiResponse_js_1.sendSuccess)({ res, data: { deleted: true } });
             }
-            await database_js_1.default.workOrder.delete({ where: { id } });
-            return (0, apiResponse_js_1.sendSuccess)({ res, data: { deleted: true } });
+            // 2. If not found in WorkOrder, check ServiceRequest (since getAll combines them)
+            const srCheck = await database_js_1.default.serviceRequest.findFirst({
+                where: companyId ? { id, companyId } : { id },
+            });
+            if (srCheck) {
+                await database_js_1.default.serviceRequest.delete({ where: { id } });
+                return (0, apiResponse_js_1.sendSuccess)({ res, data: { deleted: true } });
+            }
+            throw new Error('WorkOrder not found.');
         }
         catch (error) {
             next(error);

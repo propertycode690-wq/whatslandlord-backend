@@ -59,6 +59,9 @@ class LeaseService {
                 },
             });
             return lease;
+        }, {
+            maxWait: 10000,
+            timeout: 30000,
         });
     }
     async updateLease(id, data, companyId) {

@@ -547,6 +547,9 @@ export class PaymentService {
       }
 
       return payment;
+    }, {
+      maxWait: 10000,
+      timeout: 30000,
     });
   }
 
@@ -661,6 +664,9 @@ export class PaymentService {
           lease: true,
         },
       });
+    }, {
+      maxWait: 10000,
+      timeout: 30000,
     });
   }
 
@@ -732,6 +738,9 @@ export class PaymentService {
       });
 
       return { message: 'Payment deleted successfully.' };
+    }, {
+      maxWait: 10000,
+      timeout: 30000,
     });
   }
 }

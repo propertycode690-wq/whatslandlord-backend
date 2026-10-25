@@ -530,6 +530,9 @@ class PaymentService {
                 });
             }
             return payment;
+        }, {
+            maxWait: 10000,
+            timeout: 30000,
         });
     }
     async getPaymentById(id, companyId) {
@@ -636,6 +639,9 @@ class PaymentService {
                     lease: true,
                 },
             });
+        }, {
+            maxWait: 10000,
+            timeout: 30000,
         });
     }
     async deletePayment(id, companyId) {
@@ -699,6 +705,9 @@ class PaymentService {
                 where: { id: payment.id },
             });
             return { message: 'Payment deleted successfully.' };
+        }, {
+            maxWait: 10000,
+            timeout: 30000,
         });
     }
 }

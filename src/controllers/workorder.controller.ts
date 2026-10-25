@@ -297,15 +297,27 @@ export class WorkOrderController {
       const id = req.params['id'] as string;
       const companyId = req.user?.companyId;
 
-      if (companyId) {
-        const check = await prisma.workOrder.findFirst({
-          where: { id, companyId },
-        });
-        if (!check) throw new Error('WorkOrder not found.');
+      // 1. Try finding and deleting from WorkOrder
+      const woCheck = await prisma.workOrder.findFirst({
+        where: companyId ? { id, companyId } : { id },
+      });
+
+      if (woCheck) {
+        await prisma.workOrder.delete({ where: { id } });
+        return sendSuccess({ res, data: { deleted: true } });
       }
 
-      await prisma.workOrder.delete({ where: { id } });
-      return sendSuccess({ res, data: { deleted: true } });
+      // 2. If not found in WorkOrder, check ServiceRequest (since getAll combines them)
+      const srCheck = await prisma.serviceRequest.findFirst({
+        where: companyId ? { id, companyId } : { id },
+      });
+
+      if (srCheck) {
+        await prisma.serviceRequest.delete({ where: { id } });
+        return sendSuccess({ res, data: { deleted: true } });
+      }
+
+      throw new Error('WorkOrder not found.');
     } catch (error) {
       next(error);
     }
