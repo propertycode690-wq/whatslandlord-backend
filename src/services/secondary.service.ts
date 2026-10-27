@@ -290,7 +290,7 @@ export class SecondaryService {
         prisma.tenant.count({ where: companyFilter }),
         prisma.lease.count({ where: { ...companyFilter, status: 'Active' as any } }),
         prisma.lease.findMany({
-          where: { ...companyFilter, status: { in: ['Active', 'Pending_Renewal'] as any } },
+          where: { ...companyFilter, status: { in: ['Active', 'Pending'] } },
           include: {
             tenant: { select: { firstName: true, lastName: true, email: true, phone: true } },
             property: { select: { name: true } },
