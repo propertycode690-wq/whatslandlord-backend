@@ -674,11 +674,27 @@ ${scopedContextText}`,
 
   async deleteAiConversation(chatId: string, userPayload?: TokenPayload) {
     const companyId = userPayload?.companyId;
-    const whereClause: any = {
-      prompt: { startsWith: `[CHAT:${chatId}]` },
-    };
-    if (companyId) whereClause.companyId = companyId;
-    await prisma.aiChatLog.deleteMany({ where: whereClause });
+    const userId = userPayload?.userId;
+    const companyOrUser = companyId ? { companyId } : userId ? { userId } : {};
+
+    if (chatId === 'default-chat') {
+      await prisma.aiChatLog.deleteMany({
+        where: {
+          ...companyOrUser,
+          OR: [
+            { prompt: { startsWith: '[CHAT:default-chat]' } },
+            { NOT: { prompt: { startsWith: '[CHAT:' } } },
+          ],
+        },
+      });
+    } else {
+      await prisma.aiChatLog.deleteMany({
+        where: {
+          ...companyOrUser,
+          prompt: { startsWith: `[CHAT:${chatId}]` },
+        },
+      });
+    }
     return true;
   }
 

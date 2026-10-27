@@ -276,7 +276,7 @@ class SecondaryService {
                 database_1.default.tenant.count({ where: companyFilter }),
                 database_1.default.lease.count({ where: { ...companyFilter, status: 'Active' } }),
                 database_1.default.lease.findMany({
-                    where: { ...companyFilter, status: { in: ['Active', 'Pending_Renewal'] } },
+                    where: { ...companyFilter, status: { in: ['Active', 'Pending'] } },
                     include: {
                         tenant: { select: { firstName: true, lastName: true, email: true, phone: true } },
                         property: { select: { name: true } },
@@ -644,12 +644,27 @@ ${scopedContextText}`,
     }
     async deleteAiConversation(chatId, userPayload) {
         const companyId = userPayload?.companyId;
-        const whereClause = {
-            prompt: { startsWith: `[CHAT:${chatId}]` },
-        };
-        if (companyId)
-            whereClause.companyId = companyId;
-        await database_1.default.aiChatLog.deleteMany({ where: whereClause });
+        const userId = userPayload?.userId;
+        const companyOrUser = companyId ? { companyId } : userId ? { userId } : {};
+        if (chatId === 'default-chat') {
+            await database_1.default.aiChatLog.deleteMany({
+                where: {
+                    ...companyOrUser,
+                    OR: [
+                        { prompt: { startsWith: '[CHAT:default-chat]' } },
+                        { NOT: { prompt: { startsWith: '[CHAT:' } } },
+                    ],
+                },
+            });
+        }
+        else {
+            await database_1.default.aiChatLog.deleteMany({
+                where: {
+                    ...companyOrUser,
+                    prompt: { startsWith: `[CHAT:${chatId}]` },
+                },
+            });
+        }
         return true;
     }
     // --- 1-to-1 Direct Messaging (Strict Role/User filtering - Zero Leakage) ---
