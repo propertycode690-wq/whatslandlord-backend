@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.moveInService = exports.MoveInService = void 0;
 const database_1 = __importDefault(require("../config/database"));
 const auditHelper_1 = require("../utils/auditHelper");
+const notification_helper_1 = require("./notification.helper");
 class MoveInService {
     async getAllMoveIns(companyId, status) {
         return database_1.default.moveIn.findMany({
@@ -124,8 +125,18 @@ class MoveInService {
         const moveIn = await database_1.default.moveIn.findFirst({
             where: { id, ...(companyId ? { companyId } : {}) },
             include: {
-                lease: true,
-                unit: true,
+                lease: {
+                    include: {
+                        tenant: true,
+                        property: true,
+                        unit: true,
+                    },
+                },
+                unit: {
+                    include: {
+                        property: true,
+                    },
+                },
                 inspections: true,
             },
         });
@@ -134,11 +145,11 @@ class MoveInService {
         if (moveIn.status === 'COMPLETED')
             throw new Error('Move In is already completed');
         // Validate that Lease status is Pending Move In or Active
-        if (moveIn.lease.status !== 'Pending_Move_In' && moveIn.lease.status !== 'Active') {
+        if (moveIn.lease && moveIn.lease.status !== 'Pending_Move_In' && moveIn.lease.status !== 'Active') {
             console.warn(`Lease status is ${moveIn.lease.status}, continuing move-in completion.`);
         }
         // Validate that Unit is Vacant (relaxed for development/testing)
-        if (moveIn.unit.status !== 'Vacant') {
+        if (moveIn.unit && moveIn.unit.status !== 'Vacant') {
             console.warn(`Unit status is ${moveIn.unit.status}, continuing move-in.`);
         }
         // Validate that at least one inspection is COMPLETED (relaxed to support Skip Inspection)
@@ -156,29 +167,93 @@ class MoveInService {
                 },
             });
             // 2. Update Lease status to Active
-            await tx.lease.update({
-                where: { id: moveIn.leaseId },
-                data: {
-                    status: 'Active',
-                },
-            });
+            if (moveIn.leaseId) {
+                await tx.lease.update({
+                    where: { id: moveIn.leaseId },
+                    data: {
+                        status: 'Active',
+                    },
+                });
+            }
             // 3. Update Unit status to Occupied
-            await tx.unit.update({
-                where: { id: moveIn.unitId },
-                data: {
-                    status: 'Occupied',
-                },
-            });
+            if (moveIn.unitId) {
+                await tx.unit.update({
+                    where: { id: moveIn.unitId },
+                    data: {
+                        status: 'Occupied',
+                    },
+                });
+            }
             // 4. Update Tenant status to Active and assign unit
-            await tx.tenant.update({
-                where: { id: moveIn.lease.tenantId },
-                data: {
-                    status: 'Active',
-                    unitId: moveIn.unitId,
-                },
-            });
+            if (moveIn.lease?.tenantId) {
+                await tx.tenant.update({
+                    where: { id: moveIn.lease.tenantId },
+                    data: {
+                        status: 'Active',
+                        unitId: moveIn.unitId,
+                    },
+                });
+            }
+            // 5. Generate Immediate Move-In Rent Invoice
+            const lease = moveIn.lease;
+            let generatedInvoice = null;
+            if (lease && lease.tenantId && (lease.rentAmount || 0) > 0) {
+                const dueDateStr = lease.startDate ? lease.startDate.toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
+                const tenantName = lease.tenant ? `${lease.tenant.firstName || ''} ${lease.tenant.lastName || ''}`.trim() : 'Resident';
+                const propertyName = lease.property?.name || moveIn.unit?.property?.name || 'Property';
+                const unitNumber = lease.unit?.unitNumber || moveIn.unit?.unitNumber ? `Unit ${lease.unit?.unitNumber || moveIn.unit?.unitNumber}` : 'Unit';
+                // Check if invoice for this tenant, property and cycle dueDate already exists
+                const existingInvoice = await tx.invoice.findFirst({
+                    where: {
+                        tenantId: lease.tenantId,
+                        propertyId: lease.propertyId,
+                        dueDate: dueDateStr,
+                        lineItems: { contains: 'Rent' },
+                    },
+                });
+                if (!existingInvoice) {
+                    const lineItems = [
+                        { description: 'Rent Charge (Move-In)', amount: lease.rentAmount },
+                    ];
+                    generatedInvoice = await tx.invoice.create({
+                        data: {
+                            tenantId: lease.tenantId,
+                            tenantName,
+                            propertyId: lease.propertyId,
+                            propertyName,
+                            unitNumber,
+                            dueDate: dueDateStr,
+                            amount: lease.rentAmount,
+                            balance: lease.rentAmount,
+                            paidAmount: 0,
+                            status: 'Sent',
+                            lineItems: JSON.stringify(lineItems),
+                            notes: `Immediate rent invoice generated upon Move-In completion`,
+                            companyId: moveIn.companyId || lease.companyId,
+                        },
+                    });
+                    // Create notification for Property Manager
+                    try {
+                        await (0, notification_helper_1.createNotification)({
+                            title: 'Move-In Invoice Generated',
+                            message: `Immediate rent invoice of $${lease.rentAmount} generated for ${tenantName} (${propertyName} - ${unitNumber}).`,
+                            role: 'Property Manager',
+                            type: 'success',
+                            companyId: moveIn.companyId || lease.companyId,
+                            targetId: generatedInvoice.id,
+                            targetUrl: '/rent-payments/invoices',
+                        });
+                    }
+                    catch (notifErr) {
+                        console.warn('Failed to send move-in invoice notification:', notifErr);
+                    }
+                }
+                else {
+                    generatedInvoice = existingInvoice;
+                }
+            }
             const validUserId = await (0, auditHelper_1.getValidUserId)(userId, tx);
-            // 5. Create Audit Log
+            // 6. Create Audit Log
             await tx.auditLog.create({
                 data: {
                     action: 'Move In Completed & Lease Activated',
@@ -189,7 +264,10 @@ class MoveInService {
                     status: 'Success',
                 },
             });
-            return updatedMoveIn;
+            return {
+                ...updatedMoveIn,
+                invoice: generatedInvoice,
+            };
         });
     }
 }

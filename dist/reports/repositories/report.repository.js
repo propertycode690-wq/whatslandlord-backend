@@ -8,7 +8,7 @@ const database_1 = __importDefault(require("../../config/database"));
 class ReportRepository {
     // 1. Rent Roll Report Data
     async getRentRollData(params) {
-        const { propertyIds, propertyId, leaseStatus, search, page, limit, sortBy, sortOrder = 'desc' } = params;
+        const { propertyIds, propertyId, unitId, tenantId, leaseStatus, search, page, limit, sortBy, sortOrder = 'desc' } = params;
         const activePropertyIds = propertyId ? [propertyId] : propertyIds;
         if (activePropertyIds.length === 0) {
             return { leases: [], units: [], totalRecords: 0, summary: { totalMonthlyRent: 0, totalSecurityDeposits: 0, occupiedCount: 0, vacantCount: 0, totalUnits: 0 } };
@@ -16,6 +16,12 @@ class ReportRepository {
         const whereClause = {
             propertyId: { in: activePropertyIds },
         };
+        if (unitId) {
+            whereClause.unitId = unitId;
+        }
+        if (tenantId) {
+            whereClause.tenantId = tenantId;
+        }
         if (leaseStatus) {
             whereClause.status = leaseStatus;
         }
@@ -57,7 +63,11 @@ class ReportRepository {
                 include: { property: true, unit: true, tenant: true },
             }),
             database_1.default.unit.findMany({
-                where: { propertyId: { in: activePropertyIds } },
+                where: {
+                    propertyId: { in: activePropertyIds },
+                    ...(unitId ? { id: unitId } : {}),
+                    ...(tenantId ? { tenants: { some: { id: tenantId } } } : {}),
+                },
                 include: { property: true, tenants: true },
             }),
         ]);

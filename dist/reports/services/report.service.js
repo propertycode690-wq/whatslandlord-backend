@@ -76,6 +76,8 @@ class ReportService {
             companyId,
             propertyIds: allowedProperties,
             propertyId: query.propertyId,
+            unitId: query.unitId,
+            tenantId: query.tenantId,
             leaseStatus: query.status,
             search: query.search,
             page,
@@ -89,6 +91,8 @@ class ReportService {
             unitsFallback = await database_1.default.unit.findMany({
                 where: {
                     propertyId: { in: query.propertyId ? [query.propertyId] : allowedProperties },
+                    ...(query.unitId ? { id: query.unitId } : {}),
+                    ...(query.tenantId ? { tenants: { some: { id: query.tenantId } } } : {}),
                 },
                 include: { property: true, tenants: true },
             });

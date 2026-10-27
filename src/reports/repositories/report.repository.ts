@@ -6,6 +6,8 @@ export class ReportRepository {
     companyId?: string;
     propertyIds: string[];
     propertyId?: string;
+    unitId?: string;
+    tenantId?: string;
     leaseStatus?: string;
     search?: string;
     page: number;
@@ -13,7 +15,7 @@ export class ReportRepository {
     sortBy?: string;
     sortOrder?: 'asc' | 'desc';
   }) {
-    const { propertyIds, propertyId, leaseStatus, search, page, limit, sortBy, sortOrder = 'desc' } = params;
+    const { propertyIds, propertyId, unitId, tenantId, leaseStatus, search, page, limit, sortBy, sortOrder = 'desc' } = params;
     const activePropertyIds = propertyId ? [propertyId] : propertyIds;
 
     if (activePropertyIds.length === 0) {
@@ -23,6 +25,14 @@ export class ReportRepository {
     const whereClause: any = {
       propertyId: { in: activePropertyIds },
     };
+
+    if (unitId) {
+      whereClause.unitId = unitId;
+    }
+
+    if (tenantId) {
+      whereClause.tenantId = tenantId;
+    }
 
     if (leaseStatus) {
       whereClause.status = leaseStatus;
@@ -66,7 +76,11 @@ export class ReportRepository {
         include: { property: true, unit: true, tenant: true },
       }),
       prisma.unit.findMany({
-        where: { propertyId: { in: activePropertyIds } },
+        where: {
+          propertyId: { in: activePropertyIds },
+          ...(unitId ? { id: unitId } : {}),
+          ...(tenantId ? { tenants: { some: { id: tenantId } } } : {}),
+        },
         include: { property: true, tenants: true },
       }),
     ]);
