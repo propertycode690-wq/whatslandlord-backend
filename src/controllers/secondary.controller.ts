@@ -145,12 +145,51 @@ export class SecondaryController {
     }
   }
 
-  // AI Chat
+  // AI Assistant & Conversations
   async processAiChat(req: AuthenticatedRequest, res: Response, next: NextFunction) {
     try {
-      const { prompt } = req.body;
-      const result = await secondaryService.processAiChat(prompt || 'Show summary', req.user);
+      const { prompt, chatId } = req.body;
+      const result = await secondaryService.processAiChat(prompt || 'Show summary', req.user, chatId);
       return sendSuccess({ res, data: result });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async getAiConversations(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+    try {
+      const conversations = await secondaryService.getAiConversations(req.user);
+      return sendSuccess({ res, data: conversations });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async getAiConversationMessages(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+    try {
+      const chatId = String(req.params.chatId);
+      const messages = await secondaryService.getAiConversationMessages(chatId, req.user);
+      return sendSuccess({ res, data: messages });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async createAiConversation(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+    try {
+      const { name, module } = req.body || {};
+      const conv = await secondaryService.createAiConversation(name, module, req.user);
+      return sendSuccess({ res, data: conv });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async deleteAiConversation(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+    try {
+      const chatId = String(req.params.chatId);
+      await secondaryService.deleteAiConversation(chatId, req.user);
+      return sendSuccess({ res, message: 'Conversation deleted successfully' });
     } catch (error) {
       next(error);
     }

@@ -22,7 +22,11 @@ router.delete('/notifications', (req, res, next) => secondary_controller_1.secon
 // Documents
 router.get('/documents', (req, res, next) => secondary_controller_1.secondaryController.getDocuments(req, res, next));
 router.post('/documents', (req, res, next) => secondary_controller_1.secondaryController.createDocument(req, res, next));
-// AI Chat
+// AI Assistant & Conversations
+router.get('/ai/conversations', (req, res, next) => secondary_controller_1.secondaryController.getAiConversations(req, res, next));
+router.get('/ai/conversations/:chatId/messages', (req, res, next) => secondary_controller_1.secondaryController.getAiConversationMessages(req, res, next));
+router.post('/ai/conversations', (req, res, next) => secondary_controller_1.secondaryController.createAiConversation(req, res, next));
+router.delete('/ai/conversations/:chatId', (req, res, next) => secondary_controller_1.secondaryController.deleteAiConversation(req, res, next));
 router.post('/ai/chat', (req, res, next) => secondary_controller_1.secondaryController.processAiChat(req, res, next));
 // 1-to-1 Direct Messaging (All 5 Roles with Zero Leakage)
 router.get('/messages', (req, res, next) => secondary_controller_1.secondaryController.getDirectMessages(req, res, next));

@@ -145,12 +145,51 @@ class SecondaryController {
             next(error);
         }
     }
-    // AI Chat
+    // AI Assistant & Conversations
     async processAiChat(req, res, next) {
         try {
-            const { prompt } = req.body;
-            const result = await secondary_service_1.secondaryService.processAiChat(prompt || 'Show summary', req.user);
+            const { prompt, chatId } = req.body;
+            const result = await secondary_service_1.secondaryService.processAiChat(prompt || 'Show summary', req.user, chatId);
             return (0, apiResponse_1.sendSuccess)({ res, data: result });
+        }
+        catch (error) {
+            next(error);
+        }
+    }
+    async getAiConversations(req, res, next) {
+        try {
+            const conversations = await secondary_service_1.secondaryService.getAiConversations(req.user);
+            return (0, apiResponse_1.sendSuccess)({ res, data: conversations });
+        }
+        catch (error) {
+            next(error);
+        }
+    }
+    async getAiConversationMessages(req, res, next) {
+        try {
+            const chatId = String(req.params.chatId);
+            const messages = await secondary_service_1.secondaryService.getAiConversationMessages(chatId, req.user);
+            return (0, apiResponse_1.sendSuccess)({ res, data: messages });
+        }
+        catch (error) {
+            next(error);
+        }
+    }
+    async createAiConversation(req, res, next) {
+        try {
+            const { name, module } = req.body || {};
+            const conv = await secondary_service_1.secondaryService.createAiConversation(name, module, req.user);
+            return (0, apiResponse_1.sendSuccess)({ res, data: conv });
+        }
+        catch (error) {
+            next(error);
+        }
+    }
+    async deleteAiConversation(req, res, next) {
+        try {
+            const chatId = String(req.params.chatId);
+            await secondary_service_1.secondaryService.deleteAiConversation(chatId, req.user);
+            return (0, apiResponse_1.sendSuccess)({ res, message: 'Conversation deleted successfully' });
         }
         catch (error) {
             next(error);

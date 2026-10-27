@@ -164,10 +164,11 @@ export class SecondaryService {
   }
 
   // AI Assistant Chat Response with Strict Manager / Role Data Scoping & OpenAI Support
-  async processAiChat(prompt: string, userPayload?: TokenPayload) {
+  async processAiChat(prompt: string, userPayload?: TokenPayload, chatId?: string) {
     const userRole = userPayload?.roleName || 'Property Manager';
     const userId = userPayload?.userId;
     const userEmail = userPayload?.email;
+    const activeChatId = chatId || 'default-chat';
 
     let companyId: string | undefined = userPayload?.companyId;
     if (userId && !companyId) {
@@ -191,10 +192,14 @@ export class SecondaryService {
     let tenantsCount = 0;
     let leasesCount = 0;
     let expiringLeasesCount = 0;
+    let activeLeasesList: any[] = [];
+    let expiringLeasesList: any[] = [];
+    let vacantUnitsDetails = 'None';
     let overduePaymentsCount = 0;
     let overdueTotalAmount = 0;
     let overdueTenantDetails = '';
     let workOrdersCount = 0;
+    let workOrderDetails = '';
 
     if (userRole === 'Tenant' && userEmail) {
       // --- TENANT DATA SCOPING ---
@@ -246,19 +251,29 @@ export class SecondaryService {
       const companyFilter = companyId ? { companyId } : {};
       const unitWhere = companyId ? { property: { companyId } } : {};
 
-      const startOfMonth = new Date();
-      startOfMonth.setDate(1);
-      startOfMonth.setHours(0, 0, 0, 0);
-      const endOfMonth = new Date(startOfMonth);
-      endOfMonth.setMonth(endOfMonth.getMonth() + 1);
+      const now = new Date();
+      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+      const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1, 0, 0, 0, 0);
 
-      const [
+      let properties: any[] = [];
+      let totalUnits = 0;
+      let occupiedUnits = 0;
+      let vacantUnitsList: any[] = [];
+      let activeTenantsCount = 0;
+      let activeLeasesCount = 0;
+      let overdueInvoices: any[] = [];
+      let openWorkOrdersCount = 0;
+      let openWorkOrdersList: any[] = [];
+      let owners: any[] = [];
+
+      [
         properties,
         totalUnits,
         occupiedUnits,
+        vacantUnitsList,
         activeTenantsCount,
         activeLeasesCount,
-        expiringLeasesDataCount,
+        activeLeasesList,
         overdueInvoices,
         openWorkOrdersCount,
         openWorkOrdersList,
@@ -267,19 +282,41 @@ export class SecondaryService {
         prisma.property.findMany({ where: companyFilter, select: { id: true, name: true, unitsCount: true } }),
         prisma.unit.count({ where: unitWhere }),
         prisma.unit.count({ where: { ...unitWhere, status: 'Occupied' } }),
+        prisma.unit.findMany({
+          where: { ...unitWhere, status: 'Vacant' },
+          include: { property: { select: { name: true } } },
+          take: 10,
+        }),
         prisma.tenant.count({ where: companyFilter }),
         prisma.lease.count({ where: { ...companyFilter, status: 'Active' as any } }),
-        prisma.lease.count({ where: { ...companyFilter, status: 'Active' as any, endDate: { gte: startOfMonth, lt: endOfMonth } } }),
+        prisma.lease.findMany({
+          where: { ...companyFilter, status: { in: ['Active', 'Pending_Renewal'] as any } },
+          include: {
+            tenant: { select: { firstName: true, lastName: true, email: true, phone: true } },
+            property: { select: { name: true } },
+            unit: { select: { unitNumber: true } },
+          },
+          orderBy: { endDate: 'asc' },
+          take: 30,
+        }),
         prisma.invoice.findMany({
           where: { ...companyFilter, status: { in: ['Overdue', 'Unpaid'] } },
-          include: { tenant: { select: { firstName: true, lastName: true } } },
+          select: {
+            tenantName: true,
+            propertyName: true,
+            unitNumber: true,
+            dueDate: true,
+            amount: true,
+            balance: true,
+          },
+          take: 15,
         }),
         prisma.workOrder.count({
           where: { ...companyFilter, status: 'Open' },
         }),
         prisma.workOrder.findMany({
           where: { ...companyFilter, status: 'Open' },
-          select: { title: true, priority: true },
+          select: { title: true, priority: true, description: true },
           take: 5,
         }),
         prisma.owner.findMany({
@@ -298,20 +335,74 @@ export class SecondaryService {
       occupancyRateVal = totalUnits > 0 ? Math.round((occupiedUnits / totalUnits) * 100) : 0;
       tenantsCount = activeTenantsCount;
       leasesCount = activeLeasesCount;
-      expiringLeasesCount = expiringLeasesDataCount;
+
+      // Filter leases expiring in current month
+      expiringLeasesList = activeLeasesList.filter((l: any) => {
+        if (!l.endDate) return false;
+        const d = new Date(l.endDate);
+        return d >= startOfMonth && d < endOfMonth;
+      });
+      expiringLeasesCount = expiringLeasesList.length;
+
+      const expiringLeasesDetails = expiringLeasesList.length > 0
+        ? expiringLeasesList.map((l: any, i: number) => {
+            const tName = l.tenant ? `${l.tenant.firstName || ''} ${l.tenant.lastName || ''}`.trim() : 'Resident';
+            const pName = l.property?.name || 'Property';
+            const uNum = l.unit?.unitNumber ? (String(l.unit.unitNumber).toLowerCase().startsWith('unit') ? l.unit.unitNumber : `Unit ${l.unit.unitNumber}`) : 'Unit N/A';
+            const expDate = l.endDate ? new Date(l.endDate).toISOString().split('T')[0] : 'N/A';
+            return `  ${i + 1}. Tenant Name: ${tName} | Property: ${pName} | Unit: ${uNum} | End Date: ${expDate} | Monthly Rent: $${l.rentAmount} | Status: ${l.status}`;
+          }).join('\n')
+        : 'None expiring in the calendar month.';
+
+      const allActiveLeasesDetails = activeLeasesList.length > 0
+        ? activeLeasesList.map((l: any, i: number) => {
+            const tName = l.tenant ? `${l.tenant.firstName || ''} ${l.tenant.lastName || ''}`.trim() : 'Resident';
+            const pName = l.property?.name || 'Property';
+            const uNum = l.unit?.unitNumber ? (String(l.unit.unitNumber).toLowerCase().startsWith('unit') ? l.unit.unitNumber : `Unit ${l.unit.unitNumber}`) : 'Unit N/A';
+            const expDate = l.endDate ? new Date(l.endDate).toISOString().split('T')[0] : 'N/A';
+            return `  ${i + 1}. Tenant: ${tName} | Property: ${pName} | Unit: ${uNum} | End Date: ${expDate} | Rent: $${l.rentAmount}`;
+          }).join('\n')
+        : 'None';
+
+      vacantUnitsDetails = vacantUnitsList.length > 0
+        ? vacantUnitsList.map((u: any) => `Unit ${u.unitNumber} (${u.property?.name || 'Property'}, Rent: $${u.rentAmount || 0})`).join(', ')
+        : 'None';
+
       overduePaymentsCount = overdueInvoices.length;
-      overdueTotalAmount = overdueInvoices.reduce((sum, inv) => sum + (inv.balance || inv.amount || 0), 0);
+      overdueTotalAmount = overdueInvoices.reduce((sum: number, inv: any) => sum + (inv.balance || inv.amount || 0), 0);
       overdueTenantDetails = overdueInvoices
-        .slice(0, 5) // Limit the details string to 5 to keep the prompt size reasonable
-        .map((inv) => `${inv.tenant?.firstName || ''} ${inv.tenant?.lastName || ''} ($${inv.balance || inv.amount || 0})`)
-        .filter(Boolean)
-        .join(', ') + (overduePaymentsCount > 5 ? ' and more' : '');
+        .map((inv: any) => {
+          const tName = inv.tenantName || 'Tenant';
+          const loc = [inv.propertyName, inv.unitNumber ? `Unit ${inv.unitNumber}` : ''].filter(Boolean).join(' ');
+          const amt = inv.balance || inv.amount || 0;
+          return `- ${tName}${loc ? ` (${loc})` : ''}: $${amt} overdue (Due: ${inv.dueDate || 'N/A'})`;
+        })
+        .join('\n');
+
       workOrdersCount = openWorkOrdersCount;
-      const workOrderDetails = openWorkOrdersList.map(wo => `${wo.title} (${wo.priority})`).join(', ');
+      workOrderDetails = openWorkOrdersList.map((wo: any) => `${wo.title} (${wo.priority})`).join(', ');
 
-      scopedContextText = `User Role: ${userRole} (Company ID: ${companyId || 'Global'}). Company Owners (${ownersCount}): [${ownerNames || 'None'}]. Portfolio: ${propertiesCount} Properties ([${propertyNames || 'None'}]), ${totalUnitsCount} Total Units (${occupiedUnitsCount} Occupied, ${vacantUnitsCount} Vacant, ${occupancyRateVal}% Occupancy Rate), ${tenantsCount} Active Tenants, ${leasesCount} Active Leases (${expiringLeasesCount} expiring this month). Overdue Rent: ${overduePaymentsCount} tenants owing total $${overdueTotalAmount} (${overdueTenantDetails || 'None'}). Open Work Orders: ${workOrdersCount} pending (${workOrderDetails || 'None'}).`;
+      scopedContextText = `User Role: ${userRole} (Company ID: ${companyId || 'Global'}).
+Company Owners (${ownersCount}): [${ownerNames || 'None'}].
+Portfolio Overview: ${propertiesCount} Properties ([${propertyNames || 'None'}]), ${totalUnitsCount} Total Units (${occupiedUnitsCount} Occupied, ${vacantUnitsCount} Vacant, ${occupancyRateVal}% Occupancy Rate).
+Vacant Units List: ${vacantUnitsDetails}.
+Active Tenants: ${tenantsCount}.
+Total Active Leases: ${leasesCount}.
 
-      suggestedActions = ['Show Overdue Rent Details', 'View Vacant Units', 'Check Maintenance Requests', 'Generate Rent Roll'];
+EXACT LEASES EXPIRING THIS MONTH (${expiringLeasesCount}):
+${expiringLeasesDetails}
+
+ALL ACTIVE LEASES & EXPIRATION DATES:
+${allActiveLeasesDetails}
+
+Overdue Rent: ${overduePaymentsCount} delinquent invoice(s) totaling $${overdueTotalAmount}.
+Delinquent Details:
+${overdueTenantDetails || 'None'}
+
+Open Work Orders (${workOrdersCount}):
+${workOrderDetails || 'None'}`;
+
+      suggestedActions = ['Show Expiring Leases', 'Show Overdue Rent Details', 'View Vacant Units', 'Check Maintenance Requests'];
       relatedRecords = properties.map((p) => `Property: ${p.name}`);
     }
 
@@ -330,6 +421,26 @@ export class SecondaryService {
           headers['OpenAI-Organization'] = (env.OPENAI_ORG_ID || process.env.OPENAI_ORG_ID || '').trim();
         }
 
+        // Multi-turn conversation memory: Fetch prior messages for this chat thread
+        let priorConversationHistory: { role: 'user' | 'assistant'; content: string }[] = [];
+        try {
+          const recentLogs = await prisma.aiChatLog.findMany({
+            where: {
+              prompt: { startsWith: `[CHAT:${activeChatId}]` },
+              ...(companyId ? { companyId } : {}),
+            },
+            orderBy: { createdAt: 'desc' },
+            take: 6,
+          });
+          recentLogs.reverse();
+          priorConversationHistory = recentLogs.flatMap((log) => [
+            { role: 'user' as const, content: log.prompt.replace(/^\[CHAT:[^\]]+\]\s*/, '').trim() },
+            { role: 'assistant' as const, content: log.response },
+          ]);
+        } catch (e) {
+          console.warn('[AI Assistant] Could not fetch prior chat history:', e);
+        }
+
         const aiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
           method: 'POST',
           headers,
@@ -338,8 +449,25 @@ export class SecondaryService {
             messages: [
               {
                 role: 'system',
-                content: `You are the WhatsLandlord ERP AI Assistant. You assist property managers, owners, and tenants with rental operations. Answer user questions strictly based on the following isolated live database context. Never expose or reveal data from other companies or managers.\n\nLIVE SCOPED CONTEXT:\n${scopedContextText}`,
+                content: `You are the WhatsLandlord ERP AI Assistant. You assist property managers, owners, and tenants with rental operations. Answer user questions directly, accurately, and specifically based on the following isolated live database context.
+
+CRITICAL INSTRUCTIONS:
+- You maintain conversation context across user prompts. When the user asks a follow-up question (e.g. "can you give the details?", "what about his unit?", "only which lease is expiring", "give more info"), answer based on both the previous conversation history and the live context.
+- When the user asks about expiring leases ("Which leases expire this month?", "Which leads to expire this month", "Give the details", "Only which lease is expiring", etc.), ALWAYS provide the complete specific details:
+  * Tenant Name
+  * Property Name
+  * Unit Number
+  * Expiration / End Date
+  * Monthly Rent
+- NEVER say that specific details like tenant names or unit numbers are not available or tell the user to refer to their lease management system, because the exact details are provided in the LIVE SCOPED CONTEXT below.
+- If the user asks for "only the details" or follow-up details of expiring leases, list only the relevant fields concisely.
+- For questions about overdue rent, vacant units, maintenance, or portfolio stats, use the exact figures and names provided.
+- Format responses cleanly using markdown bullet points and bold text.
+
+LIVE SCOPED CONTEXT:
+${scopedContextText}`,
               },
+              ...priorConversationHistory,
               { role: 'user', content: prompt },
             ],
             temperature: 0.3,
@@ -372,15 +500,43 @@ export class SecondaryService {
           : `Properties Overview: No properties found in your company portfolio.`;
       } else if (q.includes('overdue') || q.includes('late') || q.includes('unpaid') || q.includes('delinquent')) {
         responseText = overduePaymentsCount > 0
-          ? `Overdue Rent Details: You have ${overduePaymentsCount} tenant(s) with overdue rent balances totaling $${overdueTotalAmount}. Pending accounts: ${overdueTenantDetails}.`
+          ? `**Overdue Rent Details (${overduePaymentsCount} delinquent accounts, total $${overdueTotalAmount}):**\n\n${overdueTenantDetails}`
           : `Overdue Rent Details: Excellent! There are no overdue rent balances currently recorded for your company.`;
       } else if (q.includes('occupancy') || q.includes('vacant') || q.includes('unit') || q.includes('units')) {
-        responseText = `Units & Occupancy Summary: Your portfolio has ${totalUnitsCount} total units. Currently, ${occupiedUnitsCount} units are occupied and ${vacantUnitsCount} units are vacant (${occupancyRateVal}% occupancy rate).`;
+        responseText = `Units & Occupancy Summary: Your portfolio has ${totalUnitsCount} total units. Currently, ${occupiedUnitsCount} units are occupied and ${vacantUnitsCount} units are vacant (${occupancyRateVal}% occupancy rate).\n\nVacant units: ${vacantUnitsDetails}`;
       } else if (q.includes('maintenance') || q.includes('work order') || q.includes('repair') || q.includes('staff')) {
         responseText = workOrdersCount > 0
-          ? `Maintenance Work Orders: There are currently ${workOrdersCount} open maintenance work orders pending resolution.`
+          ? `Maintenance Work Orders: There are currently ${workOrdersCount} open maintenance work orders pending resolution (${workOrderDetails || 'None'}).`
           : `Maintenance Work Orders: All clear! There are no open maintenance work orders pending right now.`;
-      } else if (q.includes('tenant') || q.includes('resident') || q.includes('lease')) {
+      } else if (
+        q.includes('lease') ||
+        q.includes('leads') ||
+        q.includes('expire') ||
+        q.includes('expiring') ||
+        ((q.includes('detail') || q.includes('only') || q.includes('which')) && (q.includes('this month') || q.includes('month') || q.includes('lease') || q.includes('expir')))
+      ) {
+        if (expiringLeasesList.length > 0) {
+          responseText = `**Leases Expiring This Month (${expiringLeasesList.length}):**\n\n` +
+            expiringLeasesList.map((l: any, idx: number) => {
+              const tName = l.tenant ? `${l.tenant.firstName || ''} ${l.tenant.lastName || ''}`.trim() : 'Resident';
+              const pName = l.property?.name || 'Property';
+              const uNum = l.unit?.unitNumber ? (String(l.unit.unitNumber).toLowerCase().startsWith('unit') ? l.unit.unitNumber : `Unit ${l.unit.unitNumber}`) : 'Unit N/A';
+              const expDate = l.endDate ? new Date(l.endDate).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) : 'N/A';
+              return `**${idx + 1}. ${tName}**\n- **Property:** ${pName}\n- **Unit:** ${uNum}\n- **Expiration Date:** ${expDate}\n- **Monthly Rent:** $${l.rentAmount?.toLocaleString() || 0}\n- **Status:** ${l.status || 'Active'}`;
+            }).join('\n\n');
+        } else if (activeLeasesList.length > 0) {
+          responseText = `There are no leases expiring in the current month. The upcoming lease expirations in your portfolio are:\n\n` +
+            activeLeasesList.slice(0, 3).map((l: any, idx: number) => {
+              const tName = l.tenant ? `${l.tenant.firstName || ''} ${l.tenant.lastName || ''}`.trim() : 'Resident';
+              const pName = l.property?.name || 'Property';
+              const uNum = l.unit?.unitNumber ? (String(l.unit.unitNumber).toLowerCase().startsWith('unit') ? l.unit.unitNumber : `Unit ${l.unit.unitNumber}`) : 'Unit N/A';
+              const expDate = l.endDate ? new Date(l.endDate).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) : 'N/A';
+              return `**${idx + 1}. ${tName}** - ${pName}, ${uNum} (Ending: ${expDate}, Rent: $${l.rentAmount})`;
+            }).join('\n');
+        } else {
+          responseText = `Tenants & Leases Overview: You currently have ${tenantsCount} active tenants and ${leasesCount} active leases. None are expiring this month.`;
+        }
+      } else if (q.includes('tenant') || q.includes('resident')) {
         responseText = `Tenants & Leases Overview: Your company has ${tenantsCount} active tenants and ${leasesCount} active leases on file (${expiringLeasesCount} expiring this month).`;
       } else if (q.includes('financial') || q.includes('revenue') || q.includes('report') || q.includes('statement')) {
         responseText = `Financial Metrics: Live double-entry accounting records are active. Total overdue rent outstanding is $${overdueTotalAmount} across ${overduePaymentsCount} delinquent accounts.`;
@@ -393,7 +549,7 @@ export class SecondaryService {
     try {
       await prisma.aiChatLog.create({
         data: {
-          prompt,
+          prompt: `[CHAT:${activeChatId}] ${prompt}`,
           response: responseText,
           userId,
           companyId,
@@ -408,7 +564,122 @@ export class SecondaryService {
       response: responseText,
       suggestedActions,
       relatedRecords: relatedRecords.slice(0, 5),
+      chatId: activeChatId,
     };
+  }
+
+  // --- AI CONVERSATION MANAGEMENT & PERSISTENCE ---
+  async getAiConversations(userPayload?: TokenPayload) {
+    const companyId = userPayload?.companyId;
+    const userId = userPayload?.userId;
+    const whereClause: any = {};
+    if (companyId) whereClause.companyId = companyId;
+    else if (userId) whereClause.userId = userId;
+
+    const logs = await prisma.aiChatLog.findMany({
+      where: whereClause,
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+    });
+
+    const convMap = new Map<string, { id: string; name: string; module: string; createdAt: string; status: string }>();
+
+    logs.forEach((log) => {
+      const match = log.prompt.match(/^\[CHAT:([^\]]+)\]/);
+      const chatId = match ? match[1] : 'default-chat';
+      const cleanPrompt = log.prompt.replace(/^\[CHAT:[^\]]+\]\s*/, '').trim();
+
+      if (!convMap.has(chatId)) {
+        const title = cleanPrompt.length > 32 ? cleanPrompt.substring(0, 32) + '...' : cleanPrompt || 'General Discussion';
+        convMap.set(chatId, {
+          id: chatId,
+          name: title,
+          module: 'General',
+          createdAt: log.createdAt.toISOString().split('T')[0],
+          status: 'Active',
+        });
+      }
+    });
+
+    const list = Array.from(convMap.values());
+    if (list.length === 0) {
+      list.push({
+        id: 'default-chat',
+        name: 'General Discussion',
+        module: 'General',
+        createdAt: new Date().toISOString().split('T')[0],
+        status: 'Active',
+      });
+    }
+
+    return list;
+  }
+
+  async getAiConversationMessages(chatId: string, userPayload?: TokenPayload) {
+    const companyId = userPayload?.companyId;
+    const userId = userPayload?.userId;
+    const whereClause: any = {
+      prompt: { startsWith: `[CHAT:${chatId}]` },
+    };
+    if (companyId) whereClause.companyId = companyId;
+    else if (userId) whereClause.userId = userId;
+
+    let logs = await prisma.aiChatLog.findMany({
+      where: whereClause,
+      orderBy: { createdAt: 'asc' },
+      take: 50,
+    });
+
+    if (logs.length === 0 && chatId === 'default-chat') {
+      logs = await prisma.aiChatLog.findMany({
+        where: {
+          ...(companyId ? { companyId } : {}),
+          NOT: { prompt: { startsWith: '[CHAT:' } },
+        },
+        orderBy: { createdAt: 'asc' },
+        take: 50,
+      });
+    }
+
+    const messages: any[] = [];
+    logs.forEach((log) => {
+      const cleanPrompt = log.prompt.replace(/^\[CHAT:[^\]]+\]\s*/, '').trim();
+      messages.push({
+        id: `${log.id}-user`,
+        sender: 'User',
+        text: cleanPrompt,
+        timestamp: log.createdAt.toISOString(),
+      });
+      messages.push({
+        id: `${log.id}-ai`,
+        sender: 'AI',
+        text: log.response,
+        timestamp: log.createdAt.toISOString(),
+      });
+    });
+
+    return messages;
+  }
+
+  async createAiConversation(name?: string, module?: string, userPayload?: TokenPayload) {
+    const newChatId = `chat_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    return {
+      id: newChatId,
+      name: name || 'New Discussion',
+      module: module || 'General',
+      createdAt: new Date().toISOString().split('T')[0],
+      status: 'Active',
+    };
+  }
+
+  async deleteAiConversation(chatId: string, userPayload?: TokenPayload) {
+    const companyId = userPayload?.companyId;
+    const whereClause: any = {
+      prompt: { startsWith: `[CHAT:${chatId}]` },
+    };
+    if (companyId) whereClause.companyId = companyId;
+    await prisma.aiChatLog.deleteMany({ where: whereClause });
+    return true;
   }
 
   // --- 1-to-1 Direct Messaging (Strict Role/User filtering - Zero Leakage) ---
