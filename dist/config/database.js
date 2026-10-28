@@ -25,7 +25,7 @@ exports.prisma = prismaRaw.$extends({
                     'Property', 'Owner', 'Tenant', 'StaffProfile', 'User',
                     'Document', 'OwnerDocument', 'TenantDocument', 'Lease',
                     'Invoice', 'RentPayment', 'WorkOrder', 'Announcement', 'Violation', 'ServiceRequest',
-                    'CrmLead', 'ScreeningReport'
+                    'CrmLead', 'ScreeningReport', 'Notification'
                 ];
                 // Models that require property relation-based companyId filtering
                 const modelsWithPropertyCompanyId = ['Unit', 'Building'];
@@ -46,6 +46,13 @@ exports.prisma = prismaRaw.$extends({
                                 queryArgs.where.tenantId = tenantId;
                             if (model === 'ScreeningReport')
                                 queryArgs.where.tenantId = tenantId;
+                            if (model === 'Notification') {
+                                queryArgs.where.role = 'Tenant';
+                                queryArgs.where.OR = [
+                                    { targetId: tenantId },
+                                    { userId: store.userId || tenantId },
+                                ];
+                            }
                         }
                         else if (role === 'Owner' && ownerId) {
                             if (model === 'Owner')
@@ -60,12 +67,22 @@ exports.prisma = prismaRaw.$extends({
                                 queryArgs.where.unit = { property: { ownerId } };
                             if (model === 'WorkOrder')
                                 queryArgs.where.property = { ownerId };
+                            if (model === 'Notification') {
+                                queryArgs.where.role = 'Owner';
+                                queryArgs.where.OR = [
+                                    { targetId: ownerId },
+                                    { userId: store.userId || ownerId },
+                                ];
+                            }
                         }
                         else if (role === 'Maintenance Staff' && staffId) {
                             if (model === 'WorkOrder')
                                 queryArgs.where.staffId = staffId;
                             if (model === 'StaffProfile')
                                 queryArgs.where.id = staffId;
+                            if (model === 'Notification') {
+                                queryArgs.where.role = { in: ['Maintenance Staff', 'Staff'] };
+                            }
                         }
                     }
                 }

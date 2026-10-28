@@ -1952,13 +1952,12 @@ class PortalController {
             const roleNotifs = await database_1.default.notification.findMany({
                 where: {
                     role: 'Tenant',
-                    ...(companyId ? { OR: [{ companyId }, { companyId: null }] } : {}),
+                    ...(companyId ? { companyId } : {}),
                     ...(tenantTargetIds.length > 0
                         ? {
                             OR: [
                                 { targetId: { in: tenantTargetIds } },
                                 { userId: { in: tenantTargetIds } },
-                                { targetId: null, userId: null },
                             ],
                         }
                         : {}),
@@ -1983,6 +1982,7 @@ class PortalController {
     }
     async markTenantNotificationRead(req, res, next) {
         try {
+            const companyId = req.user?.companyId;
             const id = req.params.id;
             if (id === 'all') {
                 const tenantEmail = req.user?.email;
@@ -1996,12 +1996,12 @@ class PortalController {
                 await database_1.default.notification.updateMany({
                     where: {
                         role: 'Tenant',
+                        ...(companyId ? { companyId } : {}),
                         ...(targetIds.length > 0
                             ? {
                                 OR: [
                                     { targetId: { in: targetIds } },
                                     { userId: { in: targetIds } },
-                                    { targetId: null, userId: null },
                                 ],
                             }
                             : {}),
@@ -2023,6 +2023,7 @@ class PortalController {
     }
     async clearTenantNotifications(req, res, next) {
         try {
+            const companyId = req.user?.companyId;
             const tenantEmail = req.user?.email;
             let tenantId;
             if (tenantEmail) {
@@ -2034,12 +2035,12 @@ class PortalController {
             await database_1.default.notification.deleteMany({
                 where: {
                     role: 'Tenant',
+                    ...(companyId ? { companyId } : {}),
                     ...(targetIds.length > 0
                         ? {
                             OR: [
                                 { targetId: { in: targetIds } },
                                 { userId: { in: targetIds } },
-                                { targetId: null, userId: null },
                             ],
                         }
                         : {}),

@@ -250,6 +250,7 @@ export class WorkOrderController {
             role: 'Tenant',
             companyId: existingSr.companyId,
             targetId: existingSr.tenantId,
+            targetUrl: '/tenant/maintenance',
           });
         }
 
@@ -261,6 +262,7 @@ export class WorkOrderController {
             role: 'Property Manager',
             companyId: existingSr.companyId,
             targetId: existingSr.id,
+            targetUrl: '/maintenance',
           });
         }
 

@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.secondaryController = exports.SecondaryController = void 0;
 const secondary_service_1 = require("../services/secondary.service");
 const apiResponse_1 = require("../utils/apiResponse");
+const tenantContext_1 = require("../utils/tenantContext");
 class SecondaryController {
     // Announcements
     async getAnnouncements(req, res, next) {
@@ -70,9 +71,19 @@ class SecondaryController {
     // Notifications
     async getNotifications(req, res, next) {
         try {
-            const companyId = req.user?.companyId;
-            const role = req.query.role || req.user?.roleName || req.user?.role;
-            const userContext = { id: req.user?.userId || req.user?.id, email: req.user?.email, tenantId: req.user?.tenantId, ownerId: req.user?.ownerId };
+            const store = tenantContext_1.tenantContext.getStore();
+            const companyId = store?.companyId || req.user?.companyId;
+            const tokenRole = store?.role || req.user?.roleName || req.user?.role;
+            const role = tokenRole || req.query.role;
+            const userContext = {
+                id: store?.userId || req.user?.userId || req.user?.id,
+                userId: store?.userId || req.user?.userId || req.user?.id,
+                email: req.user?.email,
+                role: tokenRole,
+                tenantId: store?.tenantId || req.user?.tenantId,
+                ownerId: store?.ownerId || req.user?.ownerId,
+                staffId: store?.staffId || req.user?.staffId
+            };
             const list = await secondary_service_1.secondaryService.getNotifications(companyId, role, userContext);
             return (0, apiResponse_1.sendSuccess)({ res, data: list });
         }
@@ -92,9 +103,19 @@ class SecondaryController {
     }
     async markAllNotificationsRead(req, res, next) {
         try {
-            const companyId = req.user?.companyId;
-            const role = req.query.role || req.user?.roleName || req.user?.role;
-            const userContext = { id: req.user?.userId || req.user?.id, email: req.user?.email, tenantId: req.user?.tenantId, ownerId: req.user?.ownerId };
+            const store = tenantContext_1.tenantContext.getStore();
+            const companyId = store?.companyId || req.user?.companyId;
+            const tokenRole = store?.role || req.user?.roleName || req.user?.role;
+            const role = tokenRole || req.query.role;
+            const userContext = {
+                id: store?.userId || req.user?.userId || req.user?.id,
+                userId: store?.userId || req.user?.userId || req.user?.id,
+                email: req.user?.email,
+                role: tokenRole,
+                tenantId: store?.tenantId || req.user?.tenantId,
+                ownerId: store?.ownerId || req.user?.ownerId,
+                staffId: store?.staffId || req.user?.staffId
+            };
             const result = await secondary_service_1.secondaryService.markAllNotificationsRead(companyId, role, userContext);
             return (0, apiResponse_1.sendSuccess)({ res, data: result });
         }
@@ -104,9 +125,19 @@ class SecondaryController {
     }
     async clearNotifications(req, res, next) {
         try {
-            const companyId = req.user?.companyId;
-            const role = req.query.role || req.user?.roleName || req.user?.role;
-            const userContext = { id: req.user?.userId || req.user?.id, email: req.user?.email, tenantId: req.user?.tenantId, ownerId: req.user?.ownerId };
+            const store = tenantContext_1.tenantContext.getStore();
+            const companyId = store?.companyId || req.user?.companyId;
+            const tokenRole = store?.role || req.user?.roleName || req.user?.role;
+            const role = tokenRole || req.query.role;
+            const userContext = {
+                id: store?.userId || req.user?.userId || req.user?.id,
+                userId: store?.userId || req.user?.userId || req.user?.id,
+                email: req.user?.email,
+                role: tokenRole,
+                tenantId: store?.tenantId || req.user?.tenantId,
+                ownerId: store?.ownerId || req.user?.ownerId,
+                staffId: store?.staffId || req.user?.staffId
+            };
             const result = await secondary_service_1.secondaryService.clearNotifications(companyId, role, userContext);
             return (0, apiResponse_1.sendSuccess)({ res, data: result });
         }

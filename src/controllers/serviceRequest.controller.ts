@@ -124,6 +124,7 @@ class ServiceRequestController {
         role: 'Property Manager',
         companyId,
         targetId: request.id,
+        targetUrl: '/maintenance',
       });
 
       await createNotification({
@@ -132,6 +133,7 @@ class ServiceRequestController {
         role: 'Maintenance Staff',
         companyId,
         targetId: request.id,
+        targetUrl: '/maintenance',
       });
 
       await createNotification({
@@ -140,6 +142,8 @@ class ServiceRequestController {
         role: 'Tenant',
         companyId,
         targetId: tenantId || req.user?.userId || (req.user as any)?.id,
+        userId: req.user?.userId || (req.user as any)?.id,
+        targetUrl: '/tenant/maintenance',
       });
 
       return sendSuccess({ res, statusCode: 201, data: { ...request, messages: [], requestNumber: `SR-${Date.now()}` } });

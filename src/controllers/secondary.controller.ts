@@ -2,6 +2,7 @@ import { Response, NextFunction } from 'express';
 import { secondaryService } from '../services/secondary.service';
 import { sendSuccess } from '../utils/apiResponse';
 import { AuthenticatedRequest } from '../middlewares/auth.middleware';
+import { tenantContext } from '../utils/tenantContext';
 
 export class SecondaryController {
   // Announcements
@@ -70,9 +71,19 @@ export class SecondaryController {
   // Notifications
   async getNotifications(req: AuthenticatedRequest, res: Response, next: NextFunction) {
     try {
-      const companyId = req.user?.companyId;
-      const role = (req.query.role as string) || req.user?.roleName || (req.user as any)?.role;
-      const userContext = { id: req.user?.userId || (req.user as any)?.id, email: req.user?.email, tenantId: (req.user as any)?.tenantId, ownerId: (req.user as any)?.ownerId };
+      const store = tenantContext.getStore();
+      const companyId = store?.companyId || req.user?.companyId;
+      const tokenRole = store?.role || req.user?.roleName || (req.user as any)?.role;
+      const role = tokenRole || (req.query.role as string);
+      const userContext = { 
+        id: store?.userId || req.user?.userId || (req.user as any)?.id, 
+        userId: store?.userId || req.user?.userId || (req.user as any)?.id,
+        email: req.user?.email, 
+        role: tokenRole,
+        tenantId: store?.tenantId || (req.user as any)?.tenantId, 
+        ownerId: store?.ownerId || (req.user as any)?.ownerId,
+        staffId: store?.staffId || (req.user as any)?.staffId
+      };
       const list = await secondaryService.getNotifications(companyId, role, userContext);
       return sendSuccess({ res, data: list });
     } catch (error) {
@@ -92,9 +103,19 @@ export class SecondaryController {
 
   async markAllNotificationsRead(req: AuthenticatedRequest, res: Response, next: NextFunction) {
     try {
-      const companyId = req.user?.companyId;
-      const role = (req.query.role as string) || req.user?.roleName || (req.user as any)?.role;
-      const userContext = { id: req.user?.userId || (req.user as any)?.id, email: req.user?.email, tenantId: (req.user as any)?.tenantId, ownerId: (req.user as any)?.ownerId };
+      const store = tenantContext.getStore();
+      const companyId = store?.companyId || req.user?.companyId;
+      const tokenRole = store?.role || req.user?.roleName || (req.user as any)?.role;
+      const role = tokenRole || (req.query.role as string);
+      const userContext = { 
+        id: store?.userId || req.user?.userId || (req.user as any)?.id, 
+        userId: store?.userId || req.user?.userId || (req.user as any)?.id,
+        email: req.user?.email, 
+        role: tokenRole,
+        tenantId: store?.tenantId || (req.user as any)?.tenantId, 
+        ownerId: store?.ownerId || (req.user as any)?.ownerId,
+        staffId: store?.staffId || (req.user as any)?.staffId
+      };
       const result = await secondaryService.markAllNotificationsRead(companyId, role, userContext);
       return sendSuccess({ res, data: result });
     } catch (error) {
@@ -104,9 +125,19 @@ export class SecondaryController {
 
   async clearNotifications(req: AuthenticatedRequest, res: Response, next: NextFunction) {
     try {
-      const companyId = req.user?.companyId;
-      const role = (req.query.role as string) || req.user?.roleName || (req.user as any)?.role;
-      const userContext = { id: req.user?.userId || (req.user as any)?.id, email: req.user?.email, tenantId: (req.user as any)?.tenantId, ownerId: (req.user as any)?.ownerId };
+      const store = tenantContext.getStore();
+      const companyId = store?.companyId || req.user?.companyId;
+      const tokenRole = store?.role || req.user?.roleName || (req.user as any)?.role;
+      const role = tokenRole || (req.query.role as string);
+      const userContext = { 
+        id: store?.userId || req.user?.userId || (req.user as any)?.id, 
+        userId: store?.userId || req.user?.userId || (req.user as any)?.id,
+        email: req.user?.email, 
+        role: tokenRole,
+        tenantId: store?.tenantId || (req.user as any)?.tenantId, 
+        ownerId: store?.ownerId || (req.user as any)?.ownerId,
+        staffId: store?.staffId || (req.user as any)?.staffId
+      };
       const result = await secondaryService.clearNotifications(companyId, role, userContext);
       return sendSuccess({ res, data: result });
     } catch (error) {

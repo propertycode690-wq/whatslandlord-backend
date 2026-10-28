@@ -124,6 +124,7 @@ class ServiceRequestController {
                 role: 'Property Manager',
                 companyId,
                 targetId: request.id,
+                targetUrl: '/maintenance',
             });
             await (0, notification_helper_1.createNotification)({
                 title: 'New Service Request Logged',
@@ -131,6 +132,7 @@ class ServiceRequestController {
                 role: 'Maintenance Staff',
                 companyId,
                 targetId: request.id,
+                targetUrl: '/maintenance',
             });
             await (0, notification_helper_1.createNotification)({
                 title: 'Request Received',
@@ -138,6 +140,8 @@ class ServiceRequestController {
                 role: 'Tenant',
                 companyId,
                 targetId: tenantId || req.user?.userId || req.user?.id,
+                userId: req.user?.userId || req.user?.id,
+                targetUrl: '/tenant/maintenance',
             });
             return (0, apiResponse_1.sendSuccess)({ res, statusCode: 201, data: { ...request, messages: [], requestNumber: `SR-${Date.now()}` } });
         }

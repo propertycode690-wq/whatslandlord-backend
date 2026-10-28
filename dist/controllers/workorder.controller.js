@@ -236,6 +236,7 @@ class WorkOrderController {
                         role: 'Tenant',
                         companyId: existingSr.companyId,
                         targetId: existingSr.tenantId,
+                        targetUrl: '/tenant/maintenance',
                     });
                 }
                 // Notify Property Manager
@@ -246,6 +247,7 @@ class WorkOrderController {
                         role: 'Property Manager',
                         companyId: existingSr.companyId,
                         targetId: existingSr.id,
+                        targetUrl: '/maintenance',
                     });
                 }
                 return (0, apiResponse_js_1.sendSuccess)({ res, data: updatedSr });

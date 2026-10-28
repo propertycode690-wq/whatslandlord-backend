@@ -2051,13 +2051,12 @@ export class PortalController {
       const roleNotifs = await prisma.notification.findMany({
         where: {
           role: 'Tenant',
-          ...(companyId ? { OR: [{ companyId }, { companyId: null }] } : {}),
+          ...(companyId ? { companyId } : {}),
           ...(tenantTargetIds.length > 0
             ? {
                 OR: [
                   { targetId: { in: tenantTargetIds } },
                   { userId: { in: tenantTargetIds } },
-                  { targetId: null, userId: null },
                 ],
               }
             : {}),
@@ -2084,6 +2083,7 @@ export class PortalController {
 
   async markTenantNotificationRead(req: AuthenticatedRequest, res: Response, next: NextFunction) {
     try {
+      const companyId = req.user?.companyId;
       const id = req.params.id as string;
       if (id === 'all') {
         const tenantEmail = req.user?.email;
@@ -2096,12 +2096,12 @@ export class PortalController {
         await prisma.notification.updateMany({
           where: {
             role: 'Tenant',
+            ...(companyId ? { companyId } : {}),
             ...(targetIds.length > 0
               ? {
                   OR: [
                     { targetId: { in: targetIds } },
                     { userId: { in: targetIds } },
-                    { targetId: null, userId: null },
                   ],
                 }
               : {}),
@@ -2122,6 +2122,7 @@ export class PortalController {
 
   async clearTenantNotifications(req: AuthenticatedRequest, res: Response, next: NextFunction) {
     try {
+      const companyId = req.user?.companyId;
       const tenantEmail = req.user?.email;
       let tenantId: string | undefined;
       if (tenantEmail) {
@@ -2132,12 +2133,12 @@ export class PortalController {
       await prisma.notification.deleteMany({
         where: {
           role: 'Tenant',
+          ...(companyId ? { companyId } : {}),
           ...(targetIds.length > 0
             ? {
                 OR: [
                   { targetId: { in: targetIds } },
                   { userId: { in: targetIds } },
-                  { targetId: null, userId: null },
                 ],
               }
             : {}),

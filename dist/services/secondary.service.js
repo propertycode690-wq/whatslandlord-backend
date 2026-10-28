@@ -59,50 +59,66 @@ class SecondaryService {
     // Notifications
     buildNotificationWhere(companyId, role, userContext) {
         const whereClause = {};
-        if (companyId) {
-            whereClause.OR = [{ companyId }, { companyId: null }];
+        const lower = (role || userContext?.role || '').toLowerCase().trim();
+        // 1. Super Admin: strictly platform level notifications only
+        if (lower.includes('superadmin') || lower.includes('super admin')) {
+            whereClause.role = 'Super Admin';
+            return whereClause;
         }
-        if (role) {
-            const lower = role.toLowerCase().trim();
-            if (lower.includes('tenant')) {
-                whereClause.role = 'Tenant';
-                const targetIds = [userContext?.tenantId, userContext?.id].filter(Boolean);
-                if (targetIds.length > 0) {
-                    whereClause.AND = [
-                        {
-                            OR: [
-                                { targetId: { in: targetIds } },
-                                { userId: { in: targetIds } },
-                                { targetId: null, userId: null },
-                            ],
-                        },
-                    ];
-                }
+        // 2. Strict Company Isolation for all tenant-scoped roles (NO companyId: null leak)
+        if (companyId) {
+            whereClause.companyId = companyId;
+        }
+        // 3. Strict Role & User Targeted Isolation
+        if (lower.includes('tenant')) {
+            whereClause.role = 'Tenant';
+            const targetIds = [userContext?.tenantId, userContext?.id, userContext?.userId].filter(Boolean);
+            if (targetIds.length > 0) {
+                whereClause.AND = [
+                    {
+                        OR: [
+                            { targetId: { in: targetIds } },
+                            { userId: { in: targetIds } },
+                        ],
+                    },
+                ];
             }
-            else if (lower.includes('owner')) {
-                whereClause.role = 'Owner';
-                if (userContext?.ownerId || userContext?.id) {
-                    const ownerIds = [userContext.ownerId, userContext.id].filter(Boolean);
-                    whereClause.AND = [
-                        {
-                            OR: [
-                                { targetId: { in: ownerIds } },
-                                { userId: { in: ownerIds } },
-                                { targetId: null, userId: null },
-                            ],
-                        },
-                    ];
-                }
+        }
+        else if (lower.includes('owner')) {
+            whereClause.role = 'Owner';
+            const ownerIds = [userContext?.ownerId, userContext?.id, userContext?.userId].filter(Boolean);
+            if (ownerIds.length > 0) {
+                whereClause.AND = [
+                    {
+                        OR: [
+                            { targetId: { in: ownerIds } },
+                            { userId: { in: ownerIds } },
+                        ],
+                    },
+                ];
             }
-            else if (lower.includes('maintenance')) {
-                whereClause.role = { in: ['Maintenance Staff', 'Staff'] };
+        }
+        else if (lower.includes('maintenance')) {
+            whereClause.role = { in: ['Maintenance Staff', 'Staff'] };
+            const staffIds = [userContext?.staffId, userContext?.id, userContext?.userId].filter(Boolean);
+            if (staffIds.length > 0) {
+                whereClause.AND = [
+                    {
+                        OR: [
+                            { targetId: { in: staffIds } },
+                            { userId: { in: staffIds } },
+                            { targetId: null, userId: null }, // General maintenance broadcasts for the company
+                        ],
+                    },
+                ];
             }
-            else if (lower.includes('collection')) {
-                whereClause.role = 'Collection Manager';
-            }
-            else {
-                whereClause.role = { in: ['Property Manager', 'Manager', 'Super Admin'] };
-            }
+        }
+        else if (lower.includes('collection')) {
+            whereClause.role = { in: ['Collection Manager', 'Collection Staff'] };
+        }
+        else {
+            // Property Manager / Manager: NEVER return 'Super Admin' alerts!
+            whereClause.role = { in: ['Property Manager', 'Manager'] };
         }
         return whereClause;
     }

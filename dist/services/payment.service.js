@@ -428,19 +428,24 @@ class PaymentService {
                     role: 'Property Manager',
                     companyId: payment.companyId,
                     targetId: payment.id,
+                    targetUrl: '/rent-payments',
                 },
             });
             // 2. Tenant (strictly addressed to this tenant)
-            await tx.notification.create({
-                data: {
-                    title: 'Payment Receipt Confirmed',
-                    message: `Your payment of $${payment.amount.toLocaleString()} ${unitNumStr ? `for Unit ${unitNumStr}` : ''} has been processed.`,
-                    type: 'success',
-                    role: 'Tenant',
-                    companyId: payment.companyId,
-                    targetId: tenant ? tenant.id : payment.id,
-                },
-            });
+            if (tenant) {
+                await tx.notification.create({
+                    data: {
+                        title: 'Payment Receipt Confirmed',
+                        message: `Your payment of $${payment.amount.toLocaleString()} ${unitNumStr ? `for Unit ${unitNumStr}` : ''} has been processed.`,
+                        type: 'success',
+                        role: 'Tenant',
+                        companyId: payment.companyId,
+                        targetId: tenant.id,
+                        userId: tenant?.userId || tenant?.user?.id || null,
+                        targetUrl: '/tenant/payments',
+                    },
+                });
+            }
             // 3. Collection Manager
             await tx.notification.create({
                 data: {
@@ -450,9 +455,10 @@ class PaymentService {
                     role: 'Collection Manager',
                     companyId: payment.companyId,
                     targetId: payment.id,
+                    targetUrl: '/rent-payments',
                 },
             });
-            // 4. Owner (if property owner exists)
+            // 4. Owner (strictly for property owner)
             if (property?.ownerId) {
                 await tx.notification.create({
                     data: {
@@ -462,6 +468,7 @@ class PaymentService {
                         role: 'Owner',
                         companyId: payment.companyId,
                         targetId: property.ownerId,
+                        targetUrl: '/owner/financials',
                     },
                 });
             }
