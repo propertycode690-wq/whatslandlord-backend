@@ -52,7 +52,7 @@ export class MoveInService {
         }
       : {};
 
-    return prisma.moveIn.findMany({
+    const moveIns = await prisma.moveIn.findMany({
       where: {
         ...companyFilter,
         ...(status ? { status: status as any } : {}),
@@ -83,6 +83,9 @@ export class MoveInService {
         orderBy: { scheduledDate: 'asc' },
       });
     });
+
+    // Exclude orphaned records that have neither valid lease nor valid unit
+    return (moveIns || []).filter((m: any) => Boolean(m.lease || m.unit));
   }
 
   async getMoveInById(id: string, companyId?: string) {

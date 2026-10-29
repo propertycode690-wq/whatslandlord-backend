@@ -54,7 +54,7 @@ class MoveInService {
                 ],
             }
             : {};
-        return database_1.default.moveIn.findMany({
+        const moveIns = await database_1.default.moveIn.findMany({
             where: {
                 ...companyFilter,
                 ...(status ? { status: status } : {}),
@@ -85,6 +85,8 @@ class MoveInService {
                 orderBy: { scheduledDate: 'asc' },
             });
         });
+        // Exclude orphaned records that have neither valid lease nor valid unit
+        return (moveIns || []).filter((m) => Boolean(m.lease || m.unit));
     }
     async getMoveInById(id, companyId) {
         const companyFilter = companyId
