@@ -75,6 +75,15 @@ class MoveInService {
                 },
             },
             orderBy: { scheduledDate: 'asc' },
+        }).catch(async (err) => {
+            console.warn('moveIn.findMany with include failed, falling back to clean select:', err.message);
+            return database_1.default.moveIn.findMany({
+                where: {
+                    ...companyFilter,
+                    ...(status ? { status: status } : {}),
+                },
+                orderBy: { scheduledDate: 'asc' },
+            });
         });
     }
     async getMoveInById(id, companyId) {

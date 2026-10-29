@@ -73,6 +73,15 @@ export class MoveInService {
         },
       },
       orderBy: { scheduledDate: 'asc' },
+    }).catch(async (err) => {
+      console.warn('moveIn.findMany with include failed, falling back to clean select:', err.message);
+      return prisma.moveIn.findMany({
+        where: {
+          ...companyFilter,
+          ...(status ? { status: status as any } : {}),
+        },
+        orderBy: { scheduledDate: 'asc' },
+      });
     });
   }
 

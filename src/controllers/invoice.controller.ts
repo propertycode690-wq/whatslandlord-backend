@@ -50,6 +50,12 @@ class InvoiceController {
           },
         },
         orderBy: { createdAt: 'desc' },
+      }).catch(async (err) => {
+        console.warn('Invoice findMany with include failed, falling back to clean query:', err.message);
+        return prisma.invoice.findMany({
+          where: whereClause,
+          orderBy: { createdAt: 'desc' },
+        });
       });
 
       const formatted = invoices.map((inv: any) => {

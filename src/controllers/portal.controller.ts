@@ -1867,6 +1867,12 @@ export class PortalController {
         where: whereClause,
         include: { tenant: true },
         orderBy: { dueDate: 'asc' },
+      }).catch(async (err) => {
+        console.warn('Portal invoices findMany with tenant include failed, falling back:', err.message);
+        return prisma.invoice.findMany({
+          where: whereClause,
+          orderBy: { dueDate: 'asc' },
+        });
       });
       return sendSuccess({ res, data: invoices });
     } catch (error) {

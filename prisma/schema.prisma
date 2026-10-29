@@ -617,7 +617,7 @@ model Application {
 
 model Invoice {
   id           String   @id @default(uuid())
-  tenantId     String
+  tenantId     String?
   tenantName   String
   propertyId   String
   propertyName String
@@ -633,7 +633,7 @@ model Invoice {
   updatedAt    DateTime @updatedAt
   companyId    String?
   company      Company? @relation(fields: [companyId], references: [id])
-  tenant       Tenant   @relation(fields: [tenantId], references: [id])
+  tenant       Tenant?  @relation(fields: [tenantId], references: [id])
 
   @@index([companyId], map: "invoices_companyId_fkey")
   @@index([tenantId], map: "invoices_tenantId_fkey")
@@ -921,8 +921,8 @@ model MaintenanceRequest {
 
 model MoveIn {
   id            String       @id @default(uuid())
-  leaseId       String       @unique
-  unitId        String
+  leaseId       String?      @unique
+  unitId        String?
   scheduledDate DateTime
   completedDate DateTime?
   status        MoveInStatus @default(SCHEDULED)
@@ -933,8 +933,8 @@ model MoveIn {
   companyId     String?
   inspections   Inspection[]
   company       Company?     @relation(fields: [companyId], references: [id])
-  lease         Lease        @relation(fields: [leaseId], references: [id], onDelete: Cascade)
-  unit          Unit         @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  lease         Lease?       @relation(fields: [leaseId], references: [id], onDelete: Cascade)
+  unit          Unit?        @relation(fields: [unitId], references: [id], onDelete: Cascade)
 
   @@index([companyId], map: "move_ins_companyId_fkey")
   @@index([unitId], map: "move_ins_unitId_fkey")
