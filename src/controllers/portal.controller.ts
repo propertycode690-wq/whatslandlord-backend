@@ -1335,7 +1335,7 @@ export class PortalController {
         const foundUnit = await prisma.unit.findFirst({
           where: {
             unitNumber: String(unitNumber).replace(/^Unit\s+/i, '').trim(),
-            ...(companyId ? { companyId } : {}),
+            ...(companyId ? { property: { companyId } } : {}),
           },
         });
         if (foundUnit) {

@@ -8,9 +8,54 @@ const database_1 = __importDefault(require("../config/database"));
 const auditHelper_1 = require("../utils/auditHelper");
 class MoveOutService {
     async getAllMoveOuts(companyId, status) {
+        // 1. Auto-sync any Lease with Terminated / Ended / Expired status without a MoveOut record
+        try {
+            const leasesWithoutMoveOut = await database_1.default.lease.findMany({
+                where: {
+                    moveOut: null,
+                    status: { in: ['Terminated', 'Ended', 'Expired', 'Cancelled'] },
+                    ...(companyId
+                        ? {
+                            OR: [
+                                { companyId },
+                                { companyId: null },
+                                { property: { companyId } },
+                            ],
+                        }
+                        : {}),
+                },
+                include: { unit: true },
+            });
+            for (const l of leasesWithoutMoveOut) {
+                await database_1.default.moveOut.create({
+                    data: {
+                        leaseId: l.id,
+                        unitId: l.unitId,
+                        scheduledDate: l.endDate || new Date(),
+                        status: 'SCHEDULED',
+                        notes: 'Auto-scheduled via lease status',
+                        createdBy: 'System',
+                        companyId: l.companyId || companyId || null,
+                    },
+                }).catch(() => { });
+            }
+        }
+        catch (syncErr) {
+            console.warn('Auto-sync moveOuts warning:', syncErr);
+        }
+        const companyFilter = companyId
+            ? {
+                OR: [
+                    { companyId },
+                    { companyId: null },
+                    { lease: { companyId } },
+                    { unit: { property: { companyId } } },
+                ],
+            }
+            : {};
         return database_1.default.moveOut.findMany({
             where: {
-                ...(companyId ? { companyId } : {}),
+                ...companyFilter,
                 ...(status ? { status: status } : {}),
             },
             include: {
@@ -32,10 +77,20 @@ class MoveOutService {
         });
     }
     async getMoveOutById(id, companyId) {
+        const companyFilter = companyId
+            ? {
+                OR: [
+                    { companyId },
+                    { companyId: null },
+                    { lease: { companyId } },
+                    { unit: { property: { companyId } } },
+                ],
+            }
+            : {};
         return database_1.default.moveOut.findFirst({
             where: {
                 id,
-                ...(companyId ? { companyId } : {}),
+                ...companyFilter,
             },
             include: {
                 unit: {
@@ -203,8 +258,18 @@ class MoveOutService {
         });
     }
     async submitDamageReview(moveOutId, items, userId, companyId) {
+        const companyFilter = companyId
+            ? {
+                OR: [
+                    { companyId },
+                    { companyId: null },
+                    { lease: { companyId } },
+                    { unit: { property: { companyId } } },
+                ],
+            }
+            : {};
         const moveOut = await database_1.default.moveOut.findFirst({
-            where: { id: moveOutId, ...(companyId ? { companyId } : {}) },
+            where: { id: moveOutId, ...companyFilter },
         });
         if (!moveOut)
             throw new Error('Move Out not found');
@@ -261,8 +326,18 @@ class MoveOutService {
         });
     }
     async completeMoveOut(id, userId, companyId) {
+        const companyFilter = companyId
+            ? {
+                OR: [
+                    { companyId },
+                    { companyId: null },
+                    { lease: { companyId } },
+                    { unit: { property: { companyId } } },
+                ],
+            }
+            : {};
         const moveOut = await database_1.default.moveOut.findFirst({
-            where: { id, ...(companyId ? { companyId } : {}) },
+            where: { id, ...companyFilter },
             include: {
                 lease: true,
                 unit: true,

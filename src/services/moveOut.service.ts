@@ -4,9 +4,56 @@ import { getValidUserId } from '../utils/auditHelper';
 
 export class MoveOutService {
   async getAllMoveOuts(companyId?: string, status?: string) {
+    // 1. Auto-sync any Lease with Terminated / Ended / Expired status without a MoveOut record
+    try {
+      const leasesWithoutMoveOut = await prisma.lease.findMany({
+        where: {
+          moveOut: null,
+          status: { in: ['Terminated', 'Ended', 'Expired', 'Cancelled'] as any },
+          ...(companyId
+            ? {
+                OR: [
+                  { companyId },
+                  { companyId: null as any },
+                  { property: { companyId } },
+                ],
+              }
+            : {}),
+        },
+        include: { unit: true },
+      });
+
+      for (const l of leasesWithoutMoveOut) {
+        await prisma.moveOut.create({
+          data: {
+            leaseId: l.id,
+            unitId: l.unitId,
+            scheduledDate: l.endDate || new Date(),
+            status: 'SCHEDULED',
+            notes: 'Auto-scheduled via lease status',
+            createdBy: 'System',
+            companyId: l.companyId || companyId || null,
+          },
+        }).catch(() => {});
+      }
+    } catch (syncErr) {
+      console.warn('Auto-sync moveOuts warning:', syncErr);
+    }
+
+    const companyFilter = companyId
+      ? {
+          OR: [
+            { companyId },
+            { companyId: null as any },
+            { lease: { companyId } },
+            { unit: { property: { companyId } } },
+          ],
+        }
+      : {};
+
     return prisma.moveOut.findMany({
       where: {
-        ...(companyId ? { companyId } : {}),
+        ...companyFilter,
         ...(status ? { status: status as any } : {}),
       },
       include: {
@@ -29,10 +76,21 @@ export class MoveOutService {
   }
 
   async getMoveOutById(id: string, companyId?: string) {
+    const companyFilter = companyId
+      ? {
+          OR: [
+            { companyId },
+            { companyId: null as any },
+            { lease: { companyId } },
+            { unit: { property: { companyId } } },
+          ],
+        }
+      : {};
+
     return prisma.moveOut.findFirst({
       where: {
         id,
-        ...(companyId ? { companyId } : {}),
+        ...companyFilter,
       },
       include: {
         unit: {
@@ -211,8 +269,19 @@ export class MoveOutService {
   }
 
   async submitDamageReview(moveOutId: string, items: any[], userId: string, companyId?: string) {
+    const companyFilter = companyId
+      ? {
+          OR: [
+            { companyId },
+            { companyId: null as any },
+            { lease: { companyId } },
+            { unit: { property: { companyId } } },
+          ],
+        }
+      : {};
+
     const moveOut = await prisma.moveOut.findFirst({
-      where: { id: moveOutId, ...(companyId ? { companyId } : {}) },
+      where: { id: moveOutId, ...companyFilter },
     });
     if (!moveOut) throw new Error('Move Out not found');
 
@@ -274,8 +343,19 @@ export class MoveOutService {
   }
 
   async completeMoveOut(id: string, userId?: string, companyId?: string) {
+    const companyFilter = companyId
+      ? {
+          OR: [
+            { companyId },
+            { companyId: null as any },
+            { lease: { companyId } },
+            { unit: { property: { companyId } } },
+          ],
+        }
+      : {};
+
     const moveOut = await prisma.moveOut.findFirst({
-      where: { id, ...(companyId ? { companyId } : {}) },
+      where: { id, ...companyFilter },
       include: {
         lease: true,
         unit: true,

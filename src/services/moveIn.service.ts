@@ -5,9 +5,56 @@ import { createNotification } from './notification.helper';
 
 export class MoveInService {
   async getAllMoveIns(companyId?: string, status?: string) {
+    // 1. Auto-sync any Lease with Pending_Move_In that doesn't have a MoveIn record yet
+    try {
+      const leasesWithoutMoveIn = await prisma.lease.findMany({
+        where: {
+          moveIn: null,
+          ...(companyId
+            ? {
+                OR: [
+                  { companyId },
+                  { companyId: null as any },
+                  { property: { companyId } },
+                ],
+              }
+            : {}),
+        },
+        include: { unit: true },
+      });
+
+      for (const l of leasesWithoutMoveIn) {
+        const mStatus = l.status === 'Active' ? 'COMPLETED' : 'SCHEDULED';
+        await prisma.moveIn.create({
+          data: {
+            leaseId: l.id,
+            unitId: l.unitId,
+            scheduledDate: l.startDate || new Date(),
+            status: mStatus as any,
+            completedDate: mStatus === 'COMPLETED' ? new Date() : null,
+            createdBy: 'System',
+            companyId: l.companyId || companyId || null,
+          },
+        }).catch(() => {});
+      }
+    } catch (syncErr) {
+      console.warn('Auto-sync moveIns warning:', syncErr);
+    }
+
+    const companyFilter = companyId
+      ? {
+          OR: [
+            { companyId },
+            { companyId: null as any },
+            { lease: { companyId } },
+            { unit: { property: { companyId } } },
+          ],
+        }
+      : {};
+
     return prisma.moveIn.findMany({
       where: {
-        ...(companyId ? { companyId } : {}),
+        ...companyFilter,
         ...(status ? { status: status as any } : {}),
       },
       include: {
@@ -30,10 +77,21 @@ export class MoveInService {
   }
 
   async getMoveInById(id: string, companyId?: string) {
+    const companyFilter = companyId
+      ? {
+          OR: [
+            { companyId },
+            { companyId: null as any },
+            { lease: { companyId } },
+            { unit: { property: { companyId } } },
+          ],
+        }
+      : {};
+
     return prisma.moveIn.findFirst({
       where: {
         id,
-        ...(companyId ? { companyId } : {}),
+        ...companyFilter,
       },
       include: {
         unit: {
@@ -123,8 +181,19 @@ export class MoveInService {
   }
 
   async completeMoveIn(id: string, userId?: string, companyId?: string) {
+    const companyFilter = companyId
+      ? {
+          OR: [
+            { companyId },
+            { companyId: null as any },
+            { lease: { companyId } },
+            { unit: { property: { companyId } } },
+          ],
+        }
+      : {};
+
     const moveIn = await prisma.moveIn.findFirst({
-      where: { id, ...(companyId ? { companyId } : {}) },
+      where: { id, ...companyFilter },
       include: {
         lease: {
           include: {

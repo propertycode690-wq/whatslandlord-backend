@@ -1280,7 +1280,7 @@ class PortalController {
                 const foundUnit = await database_1.default.unit.findFirst({
                     where: {
                         unitNumber: String(unitNumber).replace(/^Unit\s+/i, '').trim(),
-                        ...(companyId ? { companyId } : {}),
+                        ...(companyId ? { property: { companyId } } : {}),
                     },
                 });
                 if (foundUnit) {

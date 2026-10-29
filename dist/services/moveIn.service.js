@@ -9,9 +9,54 @@ const auditHelper_1 = require("../utils/auditHelper");
 const notification_helper_1 = require("./notification.helper");
 class MoveInService {
     async getAllMoveIns(companyId, status) {
+        // 1. Auto-sync any Lease with Pending_Move_In that doesn't have a MoveIn record yet
+        try {
+            const leasesWithoutMoveIn = await database_1.default.lease.findMany({
+                where: {
+                    moveIn: null,
+                    ...(companyId
+                        ? {
+                            OR: [
+                                { companyId },
+                                { companyId: null },
+                                { property: { companyId } },
+                            ],
+                        }
+                        : {}),
+                },
+                include: { unit: true },
+            });
+            for (const l of leasesWithoutMoveIn) {
+                const mStatus = l.status === 'Active' ? 'COMPLETED' : 'SCHEDULED';
+                await database_1.default.moveIn.create({
+                    data: {
+                        leaseId: l.id,
+                        unitId: l.unitId,
+                        scheduledDate: l.startDate || new Date(),
+                        status: mStatus,
+                        completedDate: mStatus === 'COMPLETED' ? new Date() : null,
+                        createdBy: 'System',
+                        companyId: l.companyId || companyId || null,
+                    },
+                }).catch(() => { });
+            }
+        }
+        catch (syncErr) {
+            console.warn('Auto-sync moveIns warning:', syncErr);
+        }
+        const companyFilter = companyId
+            ? {
+                OR: [
+                    { companyId },
+                    { companyId: null },
+                    { lease: { companyId } },
+                    { unit: { property: { companyId } } },
+                ],
+            }
+            : {};
         return database_1.default.moveIn.findMany({
             where: {
-                ...(companyId ? { companyId } : {}),
+                ...companyFilter,
                 ...(status ? { status: status } : {}),
             },
             include: {
@@ -33,10 +78,20 @@ class MoveInService {
         });
     }
     async getMoveInById(id, companyId) {
+        const companyFilter = companyId
+            ? {
+                OR: [
+                    { companyId },
+                    { companyId: null },
+                    { lease: { companyId } },
+                    { unit: { property: { companyId } } },
+                ],
+            }
+            : {};
         return database_1.default.moveIn.findFirst({
             where: {
                 id,
-                ...(companyId ? { companyId } : {}),
+                ...companyFilter,
             },
             include: {
                 unit: {
@@ -122,8 +177,18 @@ class MoveInService {
         return updatedMoveIn;
     }
     async completeMoveIn(id, userId, companyId) {
+        const companyFilter = companyId
+            ? {
+                OR: [
+                    { companyId },
+                    { companyId: null },
+                    { lease: { companyId } },
+                    { unit: { property: { companyId } } },
+                ],
+            }
+            : {};
         const moveIn = await database_1.default.moveIn.findFirst({
-            where: { id, ...(companyId ? { companyId } : {}) },
+            where: { id, ...companyFilter },
             include: {
                 lease: {
                     include: {

@@ -23,7 +23,16 @@ class ReportRepository {
             whereClause.tenantId = tenantId;
         }
         if (leaseStatus) {
-            whereClause.status = leaseStatus;
+            const ls = leaseStatus.toLowerCase();
+            if (ls === 'occupied' || ls === 'active') {
+                whereClause.status = { in: ['Active', 'ACTIVE', 'Occupied', 'occupied'] };
+            }
+            else if (ls === 'vacant' || ls === 'expired' || ls === 'terminated' || ls === 'inactive') {
+                whereClause.status = { in: ['Expired', 'Terminated', 'Inactive', 'Vacant'] };
+            }
+            else {
+                whereClause.status = leaseStatus;
+            }
         }
         if (search) {
             whereClause.AND = [
@@ -292,7 +301,19 @@ class ReportRepository {
             propertyId: { in: activePropertyIds },
         };
         if (status) {
-            whereClause.status = status;
+            const sf = status.toLowerCase().replace(/[\s_-]/g, '');
+            if (sf === 'inprogress' || sf === 'inprocess') {
+                whereClause.status = { in: ['InProgress', 'In Progress', 'in_progress', 'IN_PROGRESS', 'Assigned', 'assigned'] };
+            }
+            else if (sf === 'completed' || sf === 'closed') {
+                whereClause.status = { in: ['Completed', 'completed', 'Closed', 'closed'] };
+            }
+            else if (sf === 'notstarted' || sf === 'open' || sf === 'new') {
+                whereClause.status = { in: ['Not Started', 'not_started', 'Open', 'open', 'New', 'new', 'Pending'] };
+            }
+            else {
+                whereClause.status = { in: [status, status.toLowerCase(), status.toUpperCase()] };
+            }
         }
         if (priority) {
             whereClause.priority = priority;
@@ -365,10 +386,10 @@ class ReportRepository {
             whereClause.tenantId = tenantId;
         }
         if (paymentMethod) {
-            whereClause.paymentMethod = paymentMethod;
+            whereClause.paymentMethod = { in: [paymentMethod, paymentMethod.toLowerCase(), paymentMethod.toUpperCase()] };
         }
         if (status) {
-            whereClause.status = status;
+            whereClause.status = { in: [status, status.toLowerCase(), status.toUpperCase()] };
         }
         if (startDate || endDate) {
             whereClause.paidDate = {};
