@@ -54,14 +54,28 @@ export class DashboardController {
       });
       const monthlyRevenue = activeLeases.reduce((sum: number, l: any) => sum + (l.rentAmount || 0), 0);
 
-      // Pending rent from unpaid payments
+      // Pending rent from unpaid invoices (strictly balance > 0 and unpaid from DB)
+      const unpaidInvoices = await prisma.invoice.findMany({
+        where: {
+          status: { notIn: ['Paid', 'Cancelled', 'Void'] },
+          ...(companyId ? { companyId } : {}),
+        },
+      });
+      const invoicePendingSum = unpaidInvoices.reduce((sum: number, inv: any) => {
+        const bal = inv.balance !== null && inv.balance !== undefined ? Number(inv.balance) : (Number(inv.amount) || 0) - (Number(inv.paidAmount) || 0);
+        return sum + Math.max(0, bal);
+      }, 0);
+
+      // Pending rent from pending payments (if any)
       const unpaidPayments = await prisma.rentPayment.findMany({
         where: {
           status: 'Pending',
           ...(companyId ? { companyId } : {}),
         },
       });
-      const pendingRent = unpaidPayments.reduce((sum: number, p: any) => sum + (p.amount || 0), 0);
+      const paymentsPendingSum = unpaidPayments.reduce((sum: number, p: any) => sum + (Number(p.amount) || 0), 0);
+
+      const pendingRent = invoicePendingSum > 0 ? invoicePendingSum : paymentsPendingSum;
 
       // Sum of all recorded actual expenses from database (Expense does not have companyId)
       const dbExpenses = await prisma.expense.findMany({});

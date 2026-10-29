@@ -108,12 +108,32 @@ class DocumentController {
             next(error);
         }
     }
-    // Get Owner Documents
+    // Get Owner Documents (Strictly isolated by company or specific owner)
     async getOwnerDocuments(req, res, next) {
         try {
             const companyId = req.user?.companyId;
+            const userRole = req.user?.roleName;
+            const isOwner = userRole === 'Owner';
+            const requestedOwnerId = req.query.ownerId;
+            if (isOwner && req.user?.email) {
+                const owner = await database_1.default.owner.findFirst({
+                    where: { email: req.user.email },
+                });
+                if (!owner)
+                    return (0, apiResponse_1.sendSuccess)({ res, data: [] });
+                const docs = await database_1.default.ownerDocument.findMany({
+                    where: { ownerId: owner.id },
+                    orderBy: { uploadedAt: 'desc' },
+                });
+                return (0, apiResponse_1.sendSuccess)({ res, data: docs });
+            }
+            const whereClause = {};
+            if (companyId)
+                whereClause.companyId = companyId;
+            if (requestedOwnerId)
+                whereClause.ownerId = requestedOwnerId;
             const docs = await database_1.default.ownerDocument.findMany({
-                where: companyId ? { companyId } : {},
+                where: whereClause,
                 orderBy: { uploadedAt: 'desc' },
             });
             return (0, apiResponse_1.sendSuccess)({ res, data: docs });
@@ -122,19 +142,40 @@ class DocumentController {
             next(error);
         }
     }
-    // Get Tenant Documents
+    // Get Tenant Documents (Strictly isolated: Tenant only sees their own documents)
     async getTenantDocuments(req, res, next) {
         try {
             const companyId = req.user?.companyId;
+            const userRole = req.user?.roleName;
+            const isTenant = userRole === 'Tenant';
+            const requestedTenantId = req.query.tenantId;
+            if (isTenant && req.user?.email) {
+                const tenant = await database_1.default.tenant.findFirst({
+                    where: { email: req.user.email },
+                });
+                if (!tenant)
+                    return (0, apiResponse_1.sendSuccess)({ res, data: [] });
+                const docs = await database_1.default.tenantDocument.findMany({
+                    where: { tenantId: tenant.id },
+                    orderBy: { uploadedAt: 'desc' },
+                });
+                return (0, apiResponse_1.sendSuccess)({
+                    res,
+                    data: docs.map((d) => ({
+                        ...d,
+                        tenantName: `${tenant.firstName || ''} ${tenant.lastName || ''}`.trim() || 'Resident Tenant',
+                    })),
+                });
+            }
+            const whereClause = {};
+            if (companyId) {
+                whereClause.OR = [{ companyId }, { companyId: null }];
+            }
+            if (requestedTenantId) {
+                whereClause.tenantId = requestedTenantId;
+            }
             const docs = await database_1.default.tenantDocument.findMany({
-                where: companyId
-                    ? {
-                        OR: [
-                            { companyId },
-                            { companyId: null },
-                        ],
-                    }
-                    : {},
+                where: whereClause,
                 orderBy: { uploadedAt: 'desc' },
             });
             const tenantIds = docs.map((d) => d.tenantId).filter(Boolean);

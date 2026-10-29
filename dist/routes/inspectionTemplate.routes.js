@@ -7,6 +7,7 @@ router.get('/', (req, res, next) => inspectionTemplate_controller_1.inspectionTe
 router.get('/:id', (req, res, next) => inspectionTemplate_controller_1.inspectionTemplateController.getById(req, res, next));
 router.post('/', (req, res, next) => inspectionTemplate_controller_1.inspectionTemplateController.create(req, res, next));
 router.put('/:id', (req, res, next) => inspectionTemplate_controller_1.inspectionTemplateController.update(req, res, next));
+router.delete('/:id', (req, res, next) => inspectionTemplate_controller_1.inspectionTemplateController.delete(req, res, next));
 router.put('/:id/active', (req, res, next) => inspectionTemplate_controller_1.inspectionTemplateController.toggleActive(req, res, next));
 router.post('/:id/duplicate', (req, res, next) => inspectionTemplate_controller_1.inspectionTemplateController.duplicate(req, res, next));
 router.post('/rooms/:id/duplicate', (req, res, next) => inspectionTemplate_controller_1.inspectionTemplateController.duplicateRoom(req, res, next));

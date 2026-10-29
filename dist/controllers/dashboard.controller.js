@@ -52,14 +52,26 @@ class DashboardController {
                 },
             });
             const monthlyRevenue = activeLeases.reduce((sum, l) => sum + (l.rentAmount || 0), 0);
-            // Pending rent from unpaid payments
+            // Pending rent from unpaid invoices (strictly balance > 0 and unpaid from DB)
+            const unpaidInvoices = await database_1.default.invoice.findMany({
+                where: {
+                    status: { notIn: ['Paid', 'Cancelled', 'Void'] },
+                    ...(companyId ? { companyId } : {}),
+                },
+            });
+            const invoicePendingSum = unpaidInvoices.reduce((sum, inv) => {
+                const bal = inv.balance !== null && inv.balance !== undefined ? Number(inv.balance) : (Number(inv.amount) || 0) - (Number(inv.paidAmount) || 0);
+                return sum + Math.max(0, bal);
+            }, 0);
+            // Pending rent from pending payments (if any)
             const unpaidPayments = await database_1.default.rentPayment.findMany({
                 where: {
                     status: 'Pending',
                     ...(companyId ? { companyId } : {}),
                 },
             });
-            const pendingRent = unpaidPayments.reduce((sum, p) => sum + (p.amount || 0), 0);
+            const paymentsPendingSum = unpaidPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+            const pendingRent = invoicePendingSum > 0 ? invoicePendingSum : paymentsPendingSum;
             // Sum of all recorded actual expenses from database (Expense does not have companyId)
             const dbExpenses = await database_1.default.expense.findMany({});
             const totalExpenses = dbExpenses.reduce((sum, e) => sum + (e.amount || 0), 0);

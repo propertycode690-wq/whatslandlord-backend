@@ -275,6 +275,9 @@ export class PaymentService {
         unit: true,
         lease: true,
       },
+      orderBy: {
+        paidDate: 'desc',
+      },
     });
   }
 

@@ -280,6 +280,9 @@ class PaymentService {
                 unit: true,
                 lease: true,
             },
+            orderBy: {
+                paidDate: 'desc',
+            },
         });
     }
     async processPayment(data) {

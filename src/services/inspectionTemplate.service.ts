@@ -233,9 +233,35 @@ export class InspectionTemplateService {
         });
 
         return room;
-      },
-      { maxWait: 10000, timeout: 30000 }
+      }
     );
+  }
+
+  async deleteTemplate(id: string, companyId?: string) {
+    const templateExists = await prisma.inspectionTemplate.findFirst({
+      where: { id, ...(companyId ? { companyId } : {}) },
+    });
+    if (!templateExists) throw new Error('Template not found');
+
+    return prisma.$transaction(async (tx) => {
+      const rooms = await tx.inspectionTemplateRoom.findMany({
+        where: { templateId: id },
+        select: { id: true },
+      });
+      const roomIds = rooms.map((r) => r.id);
+      if (roomIds.length > 0) {
+        await tx.inspectionTemplateItem.deleteMany({
+          where: { roomId: { in: roomIds } },
+        });
+      }
+      await tx.inspectionTemplateRoom.deleteMany({
+        where: { templateId: id },
+      });
+      await tx.inspectionTemplate.delete({
+        where: { id },
+      });
+      return { success: true, message: 'Template deleted successfully' };
+    });
   }
 }
 

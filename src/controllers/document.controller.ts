@@ -117,12 +117,32 @@ export class DocumentController {
     }
   }
 
-  // Get Owner Documents
+  // Get Owner Documents (Strictly isolated by company or specific owner)
   async getOwnerDocuments(req: AuthenticatedRequest, res: Response, next: NextFunction) {
     try {
       const companyId = req.user?.companyId;
+      const userRole = req.user?.roleName;
+      const isOwner = userRole === 'Owner';
+      const requestedOwnerId = req.query.ownerId as string | undefined;
+
+      if (isOwner && req.user?.email) {
+        const owner = await prisma.owner.findFirst({
+          where: { email: req.user.email },
+        });
+        if (!owner) return sendSuccess({ res, data: [] });
+        const docs = await prisma.ownerDocument.findMany({
+          where: { ownerId: owner.id },
+          orderBy: { uploadedAt: 'desc' },
+        });
+        return sendSuccess({ res, data: docs });
+      }
+
+      const whereClause: any = {};
+      if (companyId) whereClause.companyId = companyId;
+      if (requestedOwnerId) whereClause.ownerId = requestedOwnerId;
+
       const docs = await prisma.ownerDocument.findMany({
-        where: companyId ? { companyId } : {},
+        where: whereClause,
         orderBy: { uploadedAt: 'desc' },
       });
       return sendSuccess({ res, data: docs });
@@ -131,19 +151,42 @@ export class DocumentController {
     }
   }
 
-  // Get Tenant Documents
+  // Get Tenant Documents (Strictly isolated: Tenant only sees their own documents)
   async getTenantDocuments(req: AuthenticatedRequest, res: Response, next: NextFunction) {
     try {
       const companyId = req.user?.companyId;
+      const userRole = req.user?.roleName;
+      const isTenant = userRole === 'Tenant';
+      const requestedTenantId = req.query.tenantId as string | undefined;
+
+      if (isTenant && req.user?.email) {
+        const tenant = await prisma.tenant.findFirst({
+          where: { email: req.user.email },
+        });
+        if (!tenant) return sendSuccess({ res, data: [] });
+        const docs = await prisma.tenantDocument.findMany({
+          where: { tenantId: tenant.id },
+          orderBy: { uploadedAt: 'desc' },
+        });
+        return sendSuccess({
+          res,
+          data: docs.map((d: any) => ({
+            ...d,
+            tenantName: `${tenant.firstName || ''} ${tenant.lastName || ''}`.trim() || 'Resident Tenant',
+          })),
+        });
+      }
+
+      const whereClause: any = {};
+      if (companyId) {
+        whereClause.OR = [{ companyId }, { companyId: null }];
+      }
+      if (requestedTenantId) {
+        whereClause.tenantId = requestedTenantId;
+      }
+
       const docs = await prisma.tenantDocument.findMany({
-        where: companyId
-          ? {
-              OR: [
-                { companyId },
-                { companyId: null },
-              ],
-            }
-          : {},
+        where: whereClause,
         orderBy: { uploadedAt: 'desc' },
       });
 

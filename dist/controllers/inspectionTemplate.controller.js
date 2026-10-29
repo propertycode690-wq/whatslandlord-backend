@@ -80,6 +80,16 @@ class InspectionTemplateController {
             next(error);
         }
     }
+    async delete(req, res, next) {
+        try {
+            const companyId = req.user?.companyId;
+            const result = await inspectionTemplate_service_1.inspectionTemplateService.deleteTemplate(req.params.id, companyId);
+            return (0, apiResponse_1.sendSuccess)({ res, data: result, message: 'Template deleted successfully' });
+        }
+        catch (error) {
+            next(error);
+        }
+    }
 }
 exports.InspectionTemplateController = InspectionTemplateController;
 exports.inspectionTemplateController = new InspectionTemplateController();
