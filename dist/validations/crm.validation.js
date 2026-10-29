@@ -9,7 +9,7 @@ exports.createCrmLeadSchema = zod_1.z.object({
         name: zod_1.z.string().trim().max(150).optional(),
         firstName: zod_1.z.string().trim().max(100).optional(),
         lastName: zod_1.z.string().trim().max(100).optional(),
-        email: zod_1.z.string({ required_error: 'Email is required' }).trim().email('Invalid email address format').max(255),
+        email: zod_1.z.string().trim().email('Invalid email address format').max(255).optional(),
         phone: zod_1.z.string().trim().max(30).optional(),
         source: zod_1.z.string().trim().max(100).optional(),
         status: zod_1.z.string().trim().max(50).optional(),

@@ -7,7 +7,7 @@ export const createCrmLeadSchema = z.object({
     name: z.string().trim().max(150).optional(),
     firstName: z.string().trim().max(100).optional(),
     lastName: z.string().trim().max(100).optional(),
-    email: z.string({ required_error: 'Email is required' }).trim().email('Invalid email address format').max(255),
+    email: z.string().trim().email('Invalid email address format').max(255).optional(),
     phone: z.string().trim().max(30).optional(),
     source: z.string().trim().max(100).optional(),
     status: z.string().trim().max(50).optional(),

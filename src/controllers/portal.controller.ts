@@ -1252,8 +1252,8 @@ export class PortalController {
       const lead = await prisma.crmLead.create({
         data: { 
           name: resolvedName, 
-          email, 
-          phone, 
+          email: email || 'lead@example.com', 
+          phone: phone || 'N/A', 
           source: resolvedSource,
           status: status || 'New',
           budget: budget ? Number(budget) : null,
@@ -2804,7 +2804,7 @@ export class PortalController {
         include: { tenant: true },
       });
 
-      if (status === 'Approved' && report.tenantId) {
+      if ((status === 'Approved' || status === 'Completed') && report.tenantId) {
         await prisma.tenant.update({
           where: { id: report.tenantId },
           data: { status: 'Active' },

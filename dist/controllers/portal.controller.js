@@ -1198,8 +1198,8 @@ class PortalController {
             const lead = await database_1.default.crmLead.create({
                 data: {
                     name: resolvedName,
-                    email,
-                    phone,
+                    email: email || 'lead@example.com',
+                    phone: phone || 'N/A',
                     source: resolvedSource,
                     status: status || 'New',
                     budget: budget ? Number(budget) : null,
@@ -2682,7 +2682,7 @@ class PortalController {
                 data: updateData,
                 include: { tenant: true },
             });
-            if (status === 'Approved' && report.tenantId) {
+            if ((status === 'Approved' || status === 'Completed') && report.tenantId) {
                 await database_1.default.tenant.update({
                     where: { id: report.tenantId },
                     data: { status: 'Active' },
