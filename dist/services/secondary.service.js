@@ -252,9 +252,12 @@ class SecondaryService {
             }
         }
         else {
-            // --- MANAGER / STAFF DATA SCOPING (STRICT BY COMPANY ID) ---
-            const companyFilter = companyId ? { companyId } : {};
-            const unitWhere = companyId ? { property: { companyId } } : {};
+            // --- MANAGER / STAFF DATA SCOPING (STRICT BY COMPANY ID & ACTIVE STATUS ONLY) ---
+            const isSuperAdmin = userRole === 'Super Admin';
+            const companyFilter = isSuperAdmin ? {} : (companyId ? { companyId } : { companyId: '__NON_EXISTENT__' });
+            const unitWhere = isSuperAdmin
+                ? { property: { status: 'Active' } }
+                : { property: { ...companyFilter, status: 'Active' } };
             const now = new Date();
             const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
             const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1, 0, 0, 0, 0);
@@ -281,7 +284,10 @@ class SecondaryService {
                 openWorkOrdersList,
                 owners,
             ] = await Promise.all([
-                database_1.default.property.findMany({ where: companyFilter, select: { id: true, name: true, unitsCount: true } }),
+                database_1.default.property.findMany({
+                    where: { ...companyFilter, status: 'Active' },
+                    select: { id: true, name: true, unitsCount: true },
+                }),
                 database_1.default.unit.count({ where: unitWhere }),
                 database_1.default.unit.count({ where: { ...unitWhere, status: 'Occupied' } }),
                 database_1.default.unit.findMany({
@@ -289,10 +295,14 @@ class SecondaryService {
                     include: { property: { select: { name: true } } },
                     take: 10,
                 }),
-                database_1.default.tenant.count({ where: companyFilter }),
-                database_1.default.lease.count({ where: { ...companyFilter, status: 'Active' } }),
+                database_1.default.tenant.count({
+                    where: { ...companyFilter, status: { not: 'Inactive' } },
+                }),
+                database_1.default.lease.count({
+                    where: { ...companyFilter, status: 'Active', property: { status: 'Active' } },
+                }),
                 database_1.default.lease.findMany({
-                    where: { ...companyFilter, status: { in: ['Active', 'Pending'] } },
+                    where: { ...companyFilter, status: { in: ['Active', 'Pending'] }, property: { status: 'Active' } },
                     include: {
                         tenant: { select: { firstName: true, lastName: true, email: true, phone: true } },
                         property: { select: { name: true } },

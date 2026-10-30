@@ -270,8 +270,8 @@ export class SecondaryService {
       const isSuperAdmin = userRole === 'Super Admin';
       const companyFilter = isSuperAdmin ? {} : (companyId ? { companyId } : { companyId: '__NON_EXISTENT__' });
       const unitWhere: any = isSuperAdmin
-        ? { property: { status: 'Active' }, status: { notIn: ['Deleted', 'Inactive'] } }
-        : { property: { ...companyFilter, status: 'Active' }, status: { notIn: ['Deleted', 'Inactive'] } };
+        ? { property: { status: 'Active' } }
+        : { property: { ...companyFilter, status: 'Active' } };
 
       const now = new Date();
       const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
