@@ -105,6 +105,11 @@ class AuthController {
                         },
                     },
                     units: {
+                        where: {
+                            status: {
+                                in: ['Vacant', 'Vacant_Needs_Preparation'],
+                            },
+                        },
                         select: {
                             id: true,
                             unitNumber: true,
