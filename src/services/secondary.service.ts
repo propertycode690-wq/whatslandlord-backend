@@ -266,9 +266,12 @@ export class SecondaryService {
         scopedContextText = `User Role: Property Owner (${userEmail}). No owner record found.`;
       }
     } else {
-      // --- MANAGER / STAFF DATA SCOPING (STRICT BY COMPANY ID) ---
-      const companyFilter = companyId ? { companyId } : {};
-      const unitWhere = companyId ? { property: { companyId } } : {};
+      // --- MANAGER / STAFF DATA SCOPING (STRICT BY COMPANY ID & ACTIVE STATUS ONLY) ---
+      const isSuperAdmin = userRole === 'Super Admin';
+      const companyFilter = isSuperAdmin ? {} : (companyId ? { companyId } : { companyId: '__NON_EXISTENT__' });
+      const unitWhere: any = isSuperAdmin
+        ? { property: { status: 'Active' }, status: { notIn: ['Deleted', 'Inactive'] } }
+        : { property: { ...companyFilter, status: 'Active' }, status: { notIn: ['Deleted', 'Inactive'] } };
 
       const now = new Date();
       const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
@@ -298,7 +301,10 @@ export class SecondaryService {
         openWorkOrdersList,
         owners,
       ] = await Promise.all([
-        prisma.property.findMany({ where: companyFilter, select: { id: true, name: true, unitsCount: true } }),
+        prisma.property.findMany({
+          where: { ...companyFilter, status: 'Active' },
+          select: { id: true, name: true, unitsCount: true },
+        }),
         prisma.unit.count({ where: unitWhere }),
         prisma.unit.count({ where: { ...unitWhere, status: 'Occupied' } }),
         prisma.unit.findMany({
@@ -306,10 +312,14 @@ export class SecondaryService {
           include: { property: { select: { name: true } } },
           take: 10,
         }),
-        prisma.tenant.count({ where: companyFilter }),
-        prisma.lease.count({ where: { ...companyFilter, status: 'Active' as any } }),
+        prisma.tenant.count({
+          where: { ...companyFilter, status: { not: 'Inactive' } },
+        }),
+        prisma.lease.count({
+          where: { ...companyFilter, status: 'Active' as any, property: { status: 'Active' } },
+        }),
         prisma.lease.findMany({
-          where: { ...companyFilter, status: { in: ['Active', 'Pending'] } },
+          where: { ...companyFilter, status: { in: ['Active', 'Pending'] }, property: { status: 'Active' } },
           include: {
             tenant: { select: { firstName: true, lastName: true, email: true, phone: true } },
             property: { select: { name: true } },
