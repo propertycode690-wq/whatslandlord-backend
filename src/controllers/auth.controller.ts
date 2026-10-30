@@ -101,6 +101,16 @@ export class AuthController {
               name: true,
             },
           },
+          units: {
+            select: {
+              id: true,
+              unitNumber: true,
+              rentAmount: true,
+              status: true,
+              bedrooms: true,
+              bathrooms: true,
+            },
+          },
         },
       });
       return sendSuccess({ res, data: properties });
@@ -119,6 +129,8 @@ export class AuthController {
         password,
         companyId,
         property,
+        unitId,
+        unitNumber,
         dob,
         nationality,
         idType,
@@ -157,6 +169,7 @@ export class AuthController {
             lastName,
             email,
             phone,
+            unitId: unitId || null,
             status: 'Pending',
             companyId,
             dob: dob || null,
@@ -188,6 +201,9 @@ export class AuthController {
         });
 
         const resolvedName = [firstName, lastName].filter(Boolean).join(' ') || 'Unnamed Lead';
+        const unitDetail = unitNumber ? `Unit: ${unitNumber}` : '';
+        const combinedNotes = [unitDetail, notes].filter(Boolean).join(' | ');
+
         const lead = await tx.crmLead.create({
           data: {
             name: resolvedName,
@@ -198,8 +214,8 @@ export class AuthController {
             budget: budget ? Number(budget) : null,
             moveInDate: moveInDate || null,
             priority: priority || 'Medium',
-            notes: notes || null,
-            property: property || null,
+            notes: combinedNotes || null,
+            property: property ? (unitNumber ? `${property} · Unit ${unitNumber}` : property) : null,
             companyId,
           },
         });

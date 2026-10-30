@@ -1328,18 +1328,36 @@ export class PortalController {
 
   async createScreeningReport(req: AuthenticatedRequest, res: Response, next: NextFunction) {
     try {
-      let { tenantId, firstName, lastName, email, phoneNumber, phone, unitId, creditScore, criminalPass, evictionPass, status, unitNumber } = req.body;
+      let { tenantId, firstName, lastName, email, phoneNumber, phone, unitId, creditScore, criminalPass, evictionPass, status, unitNumber, propertyName } = req.body;
       const companyId = req.user?.companyId;
 
-      if (!unitId && unitNumber) {
+      if (!unitId && unitNumber && unitNumber !== 'TBD' && unitNumber !== 'N/A') {
+        const cleanUnit = String(unitNumber).replace(/^Unit\s+/i, '').trim();
         const foundUnit = await prisma.unit.findFirst({
           where: {
-            unitNumber: String(unitNumber).replace(/^Unit\s+/i, '').trim(),
+            unitNumber: cleanUnit,
             ...(companyId ? { property: { companyId } } : {}),
+            ...(propertyName && propertyName !== 'Unknown Property' && propertyName !== 'N/A'
+              ? { property: { name: { contains: propertyName } } }
+              : {}),
           },
         });
         if (foundUnit) {
           unitId = foundUnit.id;
+        }
+      }
+
+      if (!unitId && propertyName && propertyName !== 'Unknown Property' && propertyName !== 'N/A') {
+        const foundPropUnit = await prisma.unit.findFirst({
+          where: {
+            property: {
+              name: { contains: propertyName },
+              ...(companyId ? { companyId } : {}),
+            },
+          },
+        });
+        if (foundPropUnit) {
+          unitId = foundPropUnit.id;
         }
       }
 

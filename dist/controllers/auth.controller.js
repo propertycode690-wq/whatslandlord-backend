@@ -104,6 +104,16 @@ class AuthController {
                             name: true,
                         },
                     },
+                    units: {
+                        select: {
+                            id: true,
+                            unitNumber: true,
+                            rentAmount: true,
+                            status: true,
+                            bedrooms: true,
+                            bathrooms: true,
+                        },
+                    },
                 },
             });
             return (0, apiResponse_1.sendSuccess)({ res, data: properties });
@@ -114,7 +124,7 @@ class AuthController {
     }
     async tenantSignup(req, res, next) {
         try {
-            const { firstName, lastName, email, phone, password, companyId, property, dob, nationality, idType, idNumber, emergencyName, emergencyRelationship, emergencyPhone, employer, position, monthlyIncome, employmentStatus, currentAddress, budget, moveInDate, notes, priority, } = req.body;
+            const { firstName, lastName, email, phone, password, companyId, property, unitId, unitNumber, dob, nationality, idType, idNumber, emergencyName, emergencyRelationship, emergencyPhone, employer, position, monthlyIncome, employmentStatus, currentAddress, budget, moveInDate, notes, priority, } = req.body;
             if (!firstName || !lastName || !email || !phone || !password || !companyId) {
                 throw new appError_1.AppError('Required parameters are missing (name, email, phone, password, and companyId are required).', 400, 'BAD_REQUEST');
             }
@@ -131,6 +141,7 @@ class AuthController {
                         lastName,
                         email,
                         phone,
+                        unitId: unitId || null,
                         status: 'Pending',
                         companyId,
                         dob: dob || null,
@@ -160,6 +171,8 @@ class AuthController {
                     },
                 });
                 const resolvedName = [firstName, lastName].filter(Boolean).join(' ') || 'Unnamed Lead';
+                const unitDetail = unitNumber ? `Unit: ${unitNumber}` : '';
+                const combinedNotes = [unitDetail, notes].filter(Boolean).join(' | ');
                 const lead = await tx.crmLead.create({
                     data: {
                         name: resolvedName,
@@ -170,8 +183,8 @@ class AuthController {
                         budget: budget ? Number(budget) : null,
                         moveInDate: moveInDate || null,
                         priority: priority || 'Medium',
-                        notes: notes || null,
-                        property: property || null,
+                        notes: combinedNotes || null,
+                        property: property ? (unitNumber ? `${property} · Unit ${unitNumber}` : property) : null,
                         companyId,
                     },
                 });
