@@ -359,6 +359,17 @@ class UnitController {
                         if (propMapByName.has(cleanName)) {
                             targetProp = propMapByName.get(cleanName);
                         }
+                        else {
+                            const alphaName = cleanName.replace(/[^a-z0-9]/g, '');
+                            targetProp = existingProperties.find((p) => {
+                                const pClean = (p.name || '').toLowerCase().trim();
+                                const pAlpha = pClean.replace(/[^a-z0-9]/g, '');
+                                return (pAlpha === alphaName ||
+                                    cleanName.includes(pClean) ||
+                                    pClean.includes(cleanName) ||
+                                    (cleanName.split(/\s+/)[0] && pClean.startsWith(cleanName.split(/\s+/)[0])));
+                            });
+                        }
                     }
                     if (!targetProp) {
                         if (existingProperties.length === 1) {
