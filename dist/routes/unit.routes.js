@@ -5,6 +5,7 @@ const unit_controller_1 = require("../controllers/unit.controller");
 const validate_middleware_1 = require("../middlewares/validate.middleware");
 const unit_validation_1 = require("../validations/unit.validation");
 const router = (0, express_1.Router)();
+router.post('/bulk-import', (req, res, next) => unit_controller_1.unitController.bulkImport(req, res, next));
 router.get('/', (req, res, next) => unit_controller_1.unitController.getAll(req, res, next));
 router.get('/:id', (req, res, next) => unit_controller_1.unitController.getById(req, res, next));
 router.post('/', (0, validate_middleware_1.validateRequest)(unit_validation_1.createUnitSchema), (req, res, next) => unit_controller_1.unitController.create(req, res, next));

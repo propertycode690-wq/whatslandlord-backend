@@ -325,6 +325,192 @@ export class UnitController {
       next(error);
     }
   }
+
+  async bulkImport(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+    try {
+      const { units } = req.body;
+      if (!Array.isArray(units) || units.length === 0) {
+        throw new AppError('No units provided for import.', 400, 'INVALID_INPUT');
+      }
+      const companyId = req.user?.companyId;
+
+      // Plan limit verification
+      if (companyId) {
+        const company = await prisma.company.findUnique({ where: { id: companyId } });
+        if (company) {
+          const totalUnitsCount = await prisma.unit.count({
+            where: { property: { companyId } },
+          });
+          const maxUnitsLimit = company.maxUnits || 500;
+          if (totalUnitsCount + units.length > maxUnitsLimit) {
+            throw new AppError(
+              `Import exceeds your plan limit! Your plan allows up to ${maxUnitsLimit} units. Current: ${totalUnitsCount}, Attempting to import: ${units.length}.`,
+              403,
+              'PLAN_LIMIT_EXCEEDED'
+            );
+          }
+        }
+      }
+
+      // Fetch all accessible properties
+      const existingProperties = await prisma.property.findMany({
+        where: {
+          status: { notIn: ['Inactive', 'Deleted'] },
+          ...(companyId ? { companyId } : {}),
+        },
+        include: {
+          buildings: true,
+        },
+      });
+
+      if (existingProperties.length === 0) {
+        throw new AppError('No properties found. Please create or import properties first before importing units.', 400, 'NO_PROPERTIES_FOUND');
+      }
+
+      const propMapById = new Map<string, any>();
+      const propMapByName = new Map<string, any>();
+      for (const p of existingProperties) {
+        propMapById.set(p.id, p);
+        if (p.name) {
+          propMapByName.set(p.name.trim().toLowerCase(), p);
+        }
+      }
+
+      // Existing unit keys for duplicate prevention
+      const existingUnits = await prisma.unit.findMany({
+        where: {
+          property: {
+            status: { notIn: ['Inactive', 'Deleted'] },
+            ...(companyId ? { companyId } : {}),
+          },
+        },
+        select: {
+          propertyId: true,
+          unitNumber: true,
+        },
+      });
+
+      const existingUnitKeySet = new Set<string>();
+      for (const u of existingUnits) {
+        existingUnitKeySet.add(`${u.propertyId}_${u.unitNumber.trim().toLowerCase()}`);
+      }
+
+      const importedUnits: any[] = [];
+      const skippedDuplicates: string[] = [];
+
+      await prisma.$transaction(
+        async (tx) => {
+          for (const item of units) {
+            if (!item.unitNumber || !String(item.unitNumber).trim()) continue;
+
+            // Resolve target property
+            let targetProp = null;
+            if (item.propertyId && propMapById.has(item.propertyId)) {
+              targetProp = propMapById.get(item.propertyId);
+            } else if (item.propertyName && typeof item.propertyName === 'string') {
+              const cleanName = item.propertyName.trim().toLowerCase();
+              if (propMapByName.has(cleanName)) {
+                targetProp = propMapByName.get(cleanName);
+              }
+            }
+
+            if (!targetProp) {
+              if (existingProperties.length === 1) {
+                targetProp = existingProperties[0];
+              } else {
+                continue;
+              }
+            }
+
+            const unitNumStr = String(item.unitNumber).trim();
+            const unitKey = `${targetProp.id}_${unitNumStr.toLowerCase()}`;
+            if (existingUnitKeySet.has(unitKey)) {
+              skippedDuplicates.push(`${targetProp.name} - Unit ${unitNumStr}`);
+              continue;
+            }
+            existingUnitKeySet.add(unitKey);
+
+            // Find or create building for property
+            let buildingId = item.buildingId;
+            if (!buildingId || !targetProp.buildings.some((b: any) => b.id === buildingId)) {
+              let building = targetProp.buildings[0];
+              if (!building) {
+                building = await tx.building.create({
+                  data: {
+                    propertyId: targetProp.id,
+                    name: `${targetProp.name} Building`,
+                    floors: Math.max(1, Number(item.floor || 1)),
+                    unitsCount: 1,
+                  },
+                });
+                targetProp.buildings.push(building);
+              }
+              buildingId = building.id;
+            }
+
+            const floor = Math.max(1, parseInt(item.floor || '1', 10) || 1);
+            const bedrooms = Math.max(0, parseInt(item.bedrooms || '1', 10) || 1);
+            const bathrooms = Math.max(0.5, parseFloat(item.bathrooms || '1.0') || 1.0);
+            const squareFootage = Math.max(0, parseFloat(item.squareFootage || '0') || 0);
+            const rentAmount = Math.max(0, parseFloat(item.rentAmount || '0') || 0);
+            const securityDeposit =
+              item.securityDeposit !== undefined && item.securityDeposit !== null && !isNaN(Number(item.securityDeposit))
+                ? Number(item.securityDeposit)
+                : rentAmount;
+
+            const createdUnit = await tx.unit.create({
+              data: {
+                propertyId: targetProp.id,
+                buildingId,
+                unitNumber: unitNumStr,
+                floor,
+                bedrooms,
+                bathrooms,
+                squareFootage,
+                rentAmount,
+                securityDeposit,
+                status: 'Vacant', // Streamlined Vacant import
+                availabilityDate: new Date(),
+              },
+            });
+
+            // Increment unitsCount on Property
+            await tx.property.update({
+              where: { id: targetProp.id },
+              data: {
+                unitsCount: { increment: 1 },
+              },
+            });
+
+            // Increment unitsCount on Building
+            await tx.building.update({
+              where: { id: buildingId },
+              data: {
+                unitsCount: { increment: 1 },
+              },
+            });
+
+            importedUnits.push(createdUnit);
+          }
+        },
+        {
+          maxWait: 20000,
+          timeout: 120000,
+        }
+      );
+
+      return sendSuccess({
+        res,
+        data: {
+          count: importedUnits.length,
+          units: importedUnits,
+          skippedDuplicates,
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
 }
 
 export const unitController = new UnitController();
