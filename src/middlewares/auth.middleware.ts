@@ -39,7 +39,8 @@ export async function authMiddleware(req: AuthenticatedRequest, res: Response, n
       ownerId = owner?.id;
     } else if (userRole === 'Maintenance Staff') {
       const staff = await prisma.staffProfile.findFirst({ where: { email: payload.email } });
-      staffId = staff?.id;
+      const vendor = staff ? null : await prisma.vendor.findFirst({ where: { email: payload.email } });
+      staffId = staff?.id || vendor?.id;
     }
 
     tenantContext.run({

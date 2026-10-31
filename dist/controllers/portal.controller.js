@@ -41,6 +41,7 @@ const database_1 = __importDefault(require("../config/database"));
 const apiResponse_1 = require("../utils/apiResponse");
 const cloudinary_1 = __importDefault(require("../config/cloudinary"));
 const billingAutomation_service_1 = require("../services/billingAutomation.service");
+const notification_helper_1 = require("../services/notification.helper");
 class PortalController {
     // --- Helper to get tenant for logged in user ---
     async getTenantForUser(req) {
@@ -419,6 +420,15 @@ class PortalController {
                     companyId: companyId,
                     messages: initialMessage,
                 },
+            });
+            // Dispatch Notification for Maintenance Staff
+            await (0, notification_helper_1.createNotification)({
+                title: 'New Maintenance Task Assigned',
+                message: `${computedPriority} priority: "${title || `${category} Repair Request`}" at ${propertyRec?.name || 'Property'} (Unit ${tenant?.unit ? tenant.unit.unitNumber : 'N/A'})`,
+                role: 'Maintenance Staff',
+                companyId: companyId,
+                targetId: newRequest.id,
+                targetUrl: '/staff/tasks',
             });
             return (0, apiResponse_1.sendSuccess)({
                 res,

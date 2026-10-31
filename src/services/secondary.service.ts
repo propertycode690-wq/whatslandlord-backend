@@ -110,7 +110,7 @@ export class SecondaryService {
             OR: [
               { targetId: { in: staffIds } },
               { userId: { in: staffIds } },
-              { targetId: null, userId: null }, // General maintenance broadcasts for the company
+              { userId: null }, // Broad role-level maintenance notification for the company (e.g. targetId is ticket ID)
             ],
           },
         ];

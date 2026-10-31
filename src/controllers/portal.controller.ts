@@ -4,6 +4,7 @@ import { sendSuccess } from '../utils/apiResponse';
 import { AuthenticatedRequest } from '../middlewares/auth.middleware';
 import cloudinary from '../config/cloudinary';
 import { generateAutoInvoices, generateAutoLateFees } from '../services/billingAutomation.service';
+import { createNotification } from '../services/notification.helper';
 
 export class PortalController {
   // --- Helper to get tenant for logged in user ---
@@ -407,6 +408,16 @@ export class PortalController {
           companyId: companyId,
           messages: initialMessage,
         },
+      });
+
+      // Dispatch Notification for Maintenance Staff
+      await createNotification({
+        title: 'New Maintenance Task Assigned',
+        message: `${computedPriority} priority: "${title || `${category} Repair Request`}" at ${propertyRec?.name || 'Property'} (Unit ${tenant?.unit ? tenant.unit.unitNumber : 'N/A'})`,
+        role: 'Maintenance Staff',
+        companyId: companyId,
+        targetId: newRequest.id,
+        targetUrl: '/staff/tasks',
       });
 
       return sendSuccess({

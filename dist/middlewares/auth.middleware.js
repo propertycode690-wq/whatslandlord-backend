@@ -37,7 +37,8 @@ async function authMiddleware(req, res, next) {
         }
         else if (userRole === 'Maintenance Staff') {
             const staff = await database_js_1.default.staffProfile.findFirst({ where: { email: payload.email } });
-            staffId = staff?.id;
+            const vendor = staff ? null : await database_js_1.default.vendor.findFirst({ where: { email: payload.email } });
+            staffId = staff?.id || vendor?.id;
         }
         tenantContext_js_1.tenantContext.run({
             userId: payload.userId,

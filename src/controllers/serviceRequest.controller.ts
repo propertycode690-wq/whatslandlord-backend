@@ -181,6 +181,19 @@ class ServiceRequestController {
         messagesData = JSON.stringify(msgs);
       }
 
+      // Check if reassigning staff when already accepted or started
+      const isReassigningVendor = assignedVendorId !== undefined || assignedVendorName !== undefined || assignedTechnician !== undefined;
+      if (isReassigningVendor) {
+        const currentReq = await prisma.serviceRequest.findUnique({ where: { id } });
+        if (currentReq && currentReq.assignedVendorId && assignedVendorId && currentReq.assignedVendorId !== assignedVendorId) {
+          const curStatus = (currentReq.status || '').toLowerCase();
+          const isStartedOrAccepted = curStatus.includes('accept') || curStatus.includes('progress') || curStatus.includes('complete') || curStatus.includes('close');
+          if (isStartedOrAccepted) {
+            throw new Error('You cannot change the maintenance staff as the task has already been accepted or started.');
+          }
+        }
+      }
+
       const request = await prisma.serviceRequest.update({
         where: { id },
         data: {
@@ -196,6 +209,18 @@ class ServiceRequestController {
           ...(messagesData !== undefined && { messages: messagesData }),
         },
       });
+
+      // Notify new Maintenance Staff if assigned or reassigned
+      if (isReassigningVendor && request.assignedVendorId) {
+        await createNotification({
+          title: 'New Maintenance Task Assigned',
+          message: `${request.priority || 'Normal'} priority: "${request.title}" at ${request.propertyName || 'Property'} (Unit ${request.unitNumber || 'N/A'})`,
+          role: 'Maintenance Staff',
+          companyId: request.companyId,
+          targetId: request.id,
+          targetUrl: '/staff/tasks',
+        });
+      }
 
       // Automatically generate Expense when Maintenance Service Request is marked Completed with a cost
       if (request.status === 'Completed' && request.cost && request.cost > 0) {
