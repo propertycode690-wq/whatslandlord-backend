@@ -195,7 +195,7 @@ class PortalController {
             const unpaidInvoices = await database_1.default.invoice.findMany({
                 where: {
                     tenantId: tenant.id,
-                    status: { not: 'Paid' }
+                    status: { in: ['Sent', 'Overdue', 'Partially Paid', 'Unpaid', 'Pending'] }
                 },
                 orderBy: {
                     dueDate: 'asc'
@@ -248,7 +248,9 @@ class PortalController {
                     email: tenant.email,
                     phone: tenant.phone,
                     unitNumber: tenant.unit ? `Unit ${tenant.unit.unitNumber}` : 'Unassigned',
-                    emergencyContact: 'Emergency Contact Available',
+                    emergencyContact: tenant.emergencyName ? `${tenant.emergencyName}${tenant.emergencyPhone ? ` (${tenant.emergencyPhone})` : ''}` : 'N/A',
+                    vehicles: tenant.vehicles || tenant.vehicle || null,
+                    pets: tenant.pets || tenant.pet || null,
                 },
             });
         }

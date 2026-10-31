@@ -317,7 +317,7 @@ class MoveInService {
                             type: 'success',
                             companyId: moveIn.companyId || lease.companyId,
                             targetId: generatedInvoice.id,
-                            targetUrl: '/rent-payments/invoices',
+                            targetUrl: '/invoices',
                         });
                     }
                     catch (notifErr) {

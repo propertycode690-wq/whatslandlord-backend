@@ -23,7 +23,7 @@ exports.upload = (0, multer_1.default)({
 exports.uploadDocument = (0, multer_1.default)({
     storage,
     limits: {
-        fileSize: 1 * 1024 * 1024, // 1 MB limit
+        fileSize: 10 * 1024 * 1024, // 10 MB limit
     },
     fileFilter: (req, file, cb) => {
         const allowedMimeTypes = [
@@ -42,7 +42,7 @@ exports.uploadDocument = (0, multer_1.default)({
             cb(null, true);
         }
         else {
-            cb(new Error('Invalid file type! Only images, PDF, Word, and Excel files up to 1 MB are allowed.'));
+            cb(new Error('Invalid file type! Only images, PDF, Word, and Excel files up to 10 MB are allowed.'));
         }
     },
 });

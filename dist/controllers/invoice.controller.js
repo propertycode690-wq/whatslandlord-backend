@@ -24,7 +24,7 @@ class InvoiceController {
                     where: { email: userEmail },
                 });
                 if (tenant) {
-                    whereClause = { tenantId: tenant.id };
+                    whereClause = { tenantId: tenant.id, status: { notIn: ['Draft', 'Void', 'Cancelled'] } };
                 }
                 else {
                     return (0, apiResponse_1.sendSuccess)({ res, data: [] });

@@ -19,7 +19,7 @@ export const upload = multer({
 export const uploadDocument = multer({
   storage,
   limits: {
-    fileSize: 1 * 1024 * 1024, // 1 MB limit
+    fileSize: 10 * 1024 * 1024, // 10 MB limit
   },
   fileFilter: (req, file, cb) => {
     const allowedMimeTypes = [
@@ -37,7 +37,7 @@ export const uploadDocument = multer({
     if (allowedMimeTypes.includes(file.mimetype)) {
       cb(null, true);
     } else {
-      cb(new Error('Invalid file type! Only images, PDF, Word, and Excel files up to 1 MB are allowed.'));
+      cb(new Error('Invalid file type! Only images, PDF, Word, and Excel files up to 10 MB are allowed.'));
     }
   },
 });

@@ -293,6 +293,12 @@ export class PaymentService {
       tenant = await prisma.tenant.findFirst({
         where: { email: data.userEmail },
       });
+      
+      // Ensure online gateway is configured for Tenant direct payment
+      const activeGateway = await this.getActiveGateway(data.companyId, propertyId || (tenant as any)?.propertyId || (tenant as any)?.unit?.propertyId, { roleName: 'Tenant', email: data.userEmail });
+      if (!activeGateway || activeGateway.provider === 'MANUAL' || activeGateway.provider === 'COMPANY_DEFAULT') {
+        throw new AppError('Online payment gateway is not configured yet. Please contact your property manager to enable online payments.', 400, 'GATEWAY_NOT_CONFIGURED');
+      }
     }
 
     if (tenant) {
@@ -439,7 +445,7 @@ export class PaymentService {
           role: 'Property Manager',
           companyId: payment.companyId,
           targetId: payment.id,
-          targetUrl: '/rent-payments',
+          targetUrl: '/payments',
         },
       });
 
@@ -468,7 +474,7 @@ export class PaymentService {
           role: 'Collection Manager',
           companyId: payment.companyId,
           targetId: payment.id,
-          targetUrl: '/rent-payments',
+          targetUrl: '/payments',
         },
       });
 
