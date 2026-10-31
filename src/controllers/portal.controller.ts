@@ -796,7 +796,15 @@ export class PortalController {
       const userEmail = req.user?.email;
       if (!userEmail) return sendSuccess({ res, data: [] });
 
-      const owner = await prisma.owner.findFirst({ where: { email: userEmail } });
+      const owner = await prisma.owner.findFirst({
+        where: {
+          OR: [
+            { email: userEmail },
+            { email: userEmail.toLowerCase().trim() },
+            ...(req.user?.userId ? [{ id: req.user.userId }] : [])
+          ]
+        }
+      });
       if (!owner) return sendSuccess({ res, data: [] });
 
       const docs = await prisma.ownerDocument.findMany({
@@ -824,7 +832,13 @@ export class PortalController {
       const userEmail = req.user?.email;
       const owner = userEmail
         ? await prisma.owner.findFirst({
-            where: { email: userEmail },
+            where: {
+              OR: [
+                { email: userEmail },
+                { email: userEmail.toLowerCase().trim() },
+                ...(req.user?.userId ? [{ id: req.user.userId }] : [])
+              ]
+            },
             include: { properties: true },
           })
         : null;
@@ -838,7 +852,7 @@ export class PortalController {
         try {
           fileUrl = await new Promise<string>((resolve, reject) => {
             const uploadStream = cloudinary.uploader.upload_stream(
-              { folder: 'owner-documents', resource_type: 'auto' },
+              { folder: 'owner', resource_type: 'auto' },
               (error, result) => {
                 if (error) return reject(error);
                 resolve(result?.secure_url || '');
@@ -862,8 +876,8 @@ export class PortalController {
           size: fileSizeStr,
           fileUrl,
           companyId: owner?.companyId || owner?.properties?.[0]?.companyId || req.user?.companyId || undefined,
-          ownerId: owner?.id || undefined,
-          propertyId: owner?.properties?.[0]?.id || undefined,
+          ownerId: owner?.id || req.body?.ownerId || undefined,
+          propertyId: owner?.properties?.[0]?.id || req.body?.propertyId || undefined,
         },
       });
 

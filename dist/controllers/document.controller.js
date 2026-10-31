@@ -31,7 +31,7 @@ class DocumentController {
             let fileUrl = '';
             try {
                 fileUrl = await new Promise((resolve, reject) => {
-                    const uploadStream = cloudinary_1.default.uploader.upload_stream({ folder: 'owner-documents', resource_type: 'auto' }, (error, result) => {
+                    const uploadStream = cloudinary_1.default.uploader.upload_stream({ folder: 'owner', resource_type: 'auto' }, (error, result) => {
                         if (error)
                             return reject(error);
                         resolve(result?.secure_url || '');
