@@ -1,6 +1,7 @@
 import prisma from '../config/database';
 import { InspectionStatus, MoveInStatus, InspectionCondition } from '@prisma/client';
 import { getValidUserId } from '../utils/auditHelper';
+import cloudinary from '../config/cloudinary';
 
 export class InspectionService {
   async getInspectionById(id: string, companyId?: string) {
@@ -152,9 +153,46 @@ export class InspectionService {
   async updateInspectionDraft(id: string, data: any, companyId?: string) {
     const inspection = await prisma.inspection.findFirst({
       where: { id, ...(companyId ? { companyId } : {}) },
+      include: {
+        moveIn: true,
+        moveOut: true,
+      },
     });
     if (!inspection) throw new Error('Inspection not found');
     if (inspection.status === 'COMPLETED') throw new Error('Cannot edit a completed inspection');
+
+    // Determine Cloudinary folder based on inspection type:
+    // 'move_out' for Move-Out workflow, 'move_in' for Move-In workflow
+    const isMoveOut = inspection.type === 'MOVE_OUT' || Boolean(inspection.moveOutId);
+    const targetFolder = isMoveOut ? 'move_out' : 'move_in';
+
+    // Pre-upload any base64 photos to Cloudinary before starting the database transaction
+    if (data.items && Array.isArray(data.items)) {
+      for (const item of data.items) {
+        if (item.photos && Array.isArray(item.photos)) {
+          for (let pIndex = 0; pIndex < item.photos.length; pIndex++) {
+            const photo = item.photos[pIndex];
+            if (photo && photo.url && typeof photo.url === 'string') {
+              // Check if photo is a base64 Data URI
+              if (photo.url.startsWith('data:image/') || photo.url.startsWith('data:application/')) {
+                try {
+                  const uploadRes = await cloudinary.uploader.upload(photo.url, {
+                    folder: targetFolder,
+                    resource_type: 'auto',
+                  });
+                  if (uploadRes && uploadRes.secure_url) {
+                    photo.url = uploadRes.secure_url;
+                  }
+                } catch (err: any) {
+                  console.error(`[Cloudinary] Failed to upload ${targetFolder} photo:`, err?.message || err);
+                  throw new Error(`Cloudinary upload failed for ${targetFolder}: ${err?.message || 'Upload error'}`);
+                }
+              }
+            }
+          }
+        }
+      }
+    }
 
     return prisma.$transaction(
       async (tx) => {
@@ -423,6 +461,51 @@ export class InspectionService {
         email: true,
       },
     });
+  }
+
+  async uploadItemPhoto(itemId: string, file: Express.Multer.File, userId?: string) {
+    const item = await prisma.inspectionItem.findUnique({
+      where: { id: itemId },
+      include: {
+        room: {
+          include: {
+            inspection: true,
+          },
+        },
+        photos: true,
+      },
+    });
+    if (!item) throw new Error('Inspection item not found');
+
+    const inspection = item.room.inspection;
+    const isMoveOut = inspection.type === 'MOVE_OUT' || Boolean(inspection.moveOutId);
+    const targetFolder = isMoveOut ? 'move_out' : 'move_in';
+
+    const uploadRes = await new Promise<any>((resolve, reject) => {
+      const uploadStream = cloudinary.uploader.upload_stream(
+        { folder: targetFolder, resource_type: 'auto' },
+        (error, result) => {
+          if (error) return reject(error);
+          resolve(result);
+        }
+      );
+      uploadStream.end(file.buffer);
+    });
+
+    const photoUrl = uploadRes?.secure_url;
+    if (!photoUrl) throw new Error('Failed to obtain secure URL from Cloudinary');
+
+    const newPhoto = await prisma.inspectionPhoto.create({
+      data: {
+        itemId,
+        url: photoUrl,
+        caption: file.originalname || 'photo.jpg',
+        sortOrder: item.photos.length,
+        uploadedBy: userId || 'User',
+      },
+    });
+
+    return newPhoto;
   }
 }
 

@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const inspection_controller_1 = require("../controllers/inspection.controller");
+const upload_middleware_1 = require("../middlewares/upload.middleware");
 const router = (0, express_1.Router)();
 router.get('/', (req, res, next) => inspection_controller_1.inspectionController.getAll(req, res, next));
 router.post('/', (req, res, next) => inspection_controller_1.inspectionController.create(req, res, next));
@@ -9,6 +10,7 @@ router.delete('/:id', (req, res, next) => inspection_controller_1.inspectionCont
 router.get('/inspectors', (req, res, next) => inspection_controller_1.inspectionController.getInspectors(req, res, next));
 router.get('/:id', (req, res, next) => inspection_controller_1.inspectionController.getById(req, res, next));
 router.put('/:id', (req, res, next) => inspection_controller_1.inspectionController.update(req, res, next));
+router.post('/items/:itemId/photos', upload_middleware_1.upload.single('photo'), (req, res, next) => inspection_controller_1.inspectionController.uploadPhoto(req, res, next));
 router.post('/:id/complete', (req, res, next) => inspection_controller_1.inspectionController.complete(req, res, next));
 router.post('/:id/reopen', (req, res, next) => inspection_controller_1.inspectionController.reopen(req, res, next));
 exports.default = router;

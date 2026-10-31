@@ -115,6 +115,18 @@ class InspectionController {
             next(error);
         }
     }
+    async uploadPhoto(req, res, next) {
+        try {
+            if (!req.file) {
+                return res.status(400).json({ error: 'No photo file uploaded' });
+            }
+            const photo = await inspection_service_1.inspectionService.uploadItemPhoto(req.params.itemId, req.file, req.user?.userId);
+            return (0, apiResponse_1.sendSuccess)({ res, statusCode: 201, data: photo });
+        }
+        catch (error) {
+            next(error);
+        }
+    }
 }
 exports.InspectionController = InspectionController;
 exports.inspectionController = new InspectionController();

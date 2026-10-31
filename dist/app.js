@@ -22,8 +22,8 @@ app.use((0, cors_1.default)({
     },
     credentials: true,
 }));
-app.use(express_1.default.json({ limit: '10mb' }));
-app.use(express_1.default.urlencoded({ extended: true, limit: '10mb' }));
+app.use(express_1.default.json({ limit: '50mb' }));
+app.use(express_1.default.urlencoded({ extended: true, limit: '50mb' }));
 app.use(requestId_middleware_1.requestIdMiddleware);
 app.use(rateLimiter_middleware_1.globalRateLimiter);
 if (env_1.env.NODE_ENV === 'development') {

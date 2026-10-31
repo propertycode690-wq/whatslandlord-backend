@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.inspectionService = exports.InspectionService = void 0;
 const database_1 = __importDefault(require("../config/database"));
 const auditHelper_1 = require("../utils/auditHelper");
+const cloudinary_1 = __importDefault(require("../config/cloudinary"));
 class InspectionService {
     async getInspectionById(id, companyId) {
         return database_1.default.inspection.findFirst({
@@ -146,11 +147,47 @@ class InspectionService {
     async updateInspectionDraft(id, data, companyId) {
         const inspection = await database_1.default.inspection.findFirst({
             where: { id, ...(companyId ? { companyId } : {}) },
+            include: {
+                moveIn: true,
+                moveOut: true,
+            },
         });
         if (!inspection)
             throw new Error('Inspection not found');
         if (inspection.status === 'COMPLETED')
             throw new Error('Cannot edit a completed inspection');
+        // Determine Cloudinary folder based on inspection type:
+        // 'move_out' for Move-Out workflow, 'move_in' for Move-In workflow
+        const isMoveOut = inspection.type === 'MOVE_OUT' || Boolean(inspection.moveOutId);
+        const targetFolder = isMoveOut ? 'move_out' : 'move_in';
+        // Pre-upload any base64 photos to Cloudinary before starting the database transaction
+        if (data.items && Array.isArray(data.items)) {
+            for (const item of data.items) {
+                if (item.photos && Array.isArray(item.photos)) {
+                    for (let pIndex = 0; pIndex < item.photos.length; pIndex++) {
+                        const photo = item.photos[pIndex];
+                        if (photo && photo.url && typeof photo.url === 'string') {
+                            // Check if photo is a base64 Data URI
+                            if (photo.url.startsWith('data:image/') || photo.url.startsWith('data:application/')) {
+                                try {
+                                    const uploadRes = await cloudinary_1.default.uploader.upload(photo.url, {
+                                        folder: targetFolder,
+                                        resource_type: 'auto',
+                                    });
+                                    if (uploadRes && uploadRes.secure_url) {
+                                        photo.url = uploadRes.secure_url;
+                                    }
+                                }
+                                catch (err) {
+                                    console.error(`[Cloudinary] Failed to upload ${targetFolder} photo:`, err?.message || err);
+                                    throw new Error(`Cloudinary upload failed for ${targetFolder}: ${err?.message || 'Upload error'}`);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
         return database_1.default.$transaction(async (tx) => {
             // Update basic fields
             const updateData = {};
@@ -403,6 +440,45 @@ class InspectionService {
                 email: true,
             },
         });
+    }
+    async uploadItemPhoto(itemId, file, userId) {
+        const item = await database_1.default.inspectionItem.findUnique({
+            where: { id: itemId },
+            include: {
+                room: {
+                    include: {
+                        inspection: true,
+                    },
+                },
+                photos: true,
+            },
+        });
+        if (!item)
+            throw new Error('Inspection item not found');
+        const inspection = item.room.inspection;
+        const isMoveOut = inspection.type === 'MOVE_OUT' || Boolean(inspection.moveOutId);
+        const targetFolder = isMoveOut ? 'move_out' : 'move_in';
+        const uploadRes = await new Promise((resolve, reject) => {
+            const uploadStream = cloudinary_1.default.uploader.upload_stream({ folder: targetFolder, resource_type: 'auto' }, (error, result) => {
+                if (error)
+                    return reject(error);
+                resolve(result);
+            });
+            uploadStream.end(file.buffer);
+        });
+        const photoUrl = uploadRes?.secure_url;
+        if (!photoUrl)
+            throw new Error('Failed to obtain secure URL from Cloudinary');
+        const newPhoto = await database_1.default.inspectionPhoto.create({
+            data: {
+                itemId,
+                url: photoUrl,
+                caption: file.originalname || 'photo.jpg',
+                sortOrder: item.photos.length,
+                uploadedBy: userId || 'User',
+            },
+        });
+        return newPhoto;
     }
 }
 exports.InspectionService = InspectionService;
