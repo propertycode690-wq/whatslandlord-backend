@@ -77,7 +77,7 @@ exports.prisma = prismaRaw.$extends({
                         }
                         else if (role === 'Maintenance Staff' && staffId) {
                             if (model === 'WorkOrder')
-                                queryArgs.where.staffId = staffId;
+                                queryArgs.where.vendorId = staffId;
                             if (model === 'StaffProfile')
                                 queryArgs.where.id = staffId;
                             if (model === 'Notification') {
