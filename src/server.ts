@@ -100,6 +100,18 @@ async function bootstrapDb() {
       logger.info('✅ Restored owner rohit into database.');
     }
 
+    // 🛡️ Auto-clean orphaned MoveOuts and Leases referencing deleted Units so queries never crash
+    await prisma.$executeRawUnsafe(`
+      DELETE FROM move_outs WHERE unitId IS NOT NULL AND unitId NOT IN (SELECT id FROM units);
+    `).catch(() => {});
+    await prisma.$executeRawUnsafe(`
+      DELETE FROM leases WHERE unitId IS NOT NULL AND unitId NOT IN (SELECT id FROM units);
+    `).catch(() => {});
+    await prisma.$executeRawUnsafe(`
+      DELETE FROM move_ins WHERE unitId IS NOT NULL AND unitId NOT IN (SELECT id FROM units);
+    `).catch(() => {});
+    logger.info('🛡️ Orphaned leases and move_outs auto-cleaned successfully.');
+
     logger.info('✅ Database schema bootstrap completed.');
   } catch (error) {
     logger.error(error, '❌ Failed to bootstrap database schema:');

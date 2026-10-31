@@ -226,7 +226,7 @@ model Lease {
   id            String        @id @default(uuid())
   tenantId      String
   propertyId    String
-  unitId        String
+  unitId        String?
   startDate     DateTime
   endDate       DateTime
   rentAmount    Float
@@ -236,7 +236,7 @@ model Lease {
   company       Company?      @relation(fields: [companyId], references: [id])
   property      Property      @relation(fields: [propertyId], references: [id])
   tenant        Tenant        @relation(fields: [tenantId], references: [id])
-  unit          Unit          @relation(fields: [unitId], references: [id])
+  unit          Unit?         @relation(fields: [unitId], references: [id])
   moveIn        MoveIn?
   moveOut       MoveOut?
   renewal       LeaseRenewal?
@@ -944,7 +944,7 @@ model MoveIn {
 model MoveOut {
   id             String                 @id @default(uuid())
   leaseId        String                 @unique
-  unitId         String
+  unitId         String?
   scheduledDate  DateTime
   completedDate  DateTime?
   status         MoveOutStatus          @default(SCHEDULED)
@@ -960,8 +960,8 @@ model MoveOut {
   inspections    Inspection[]
   depositSummary MoveOutDepositSummary?
   company        Company?               @relation(fields: [companyId], references: [id])
-  lease          Lease                  @relation(fields: [leaseId], references: [id], onDelete: Cascade)
-  unit           Unit                   @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  lease          Lease?                 @relation(fields: [leaseId], references: [id], onDelete: Cascade)
+  unit           Unit?                  @relation(fields: [unitId], references: [id], onDelete: Cascade)
 
   @@index([companyId], map: "move_outs_companyId_fkey")
   @@index([unitId], map: "move_outs_unitId_fkey")

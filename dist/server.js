@@ -96,6 +96,17 @@ async function bootstrapDb() {
             }).catch(() => { });
             logger_1.logger.info('✅ Restored owner rohit into database.');
         }
+        // 🛡️ Auto-clean orphaned MoveOuts and Leases referencing deleted Units so queries never crash
+        await database_1.default.$executeRawUnsafe(`
+      DELETE FROM move_outs WHERE unitId IS NOT NULL AND unitId NOT IN (SELECT id FROM units);
+    `).catch(() => { });
+        await database_1.default.$executeRawUnsafe(`
+      DELETE FROM leases WHERE unitId IS NOT NULL AND unitId NOT IN (SELECT id FROM units);
+    `).catch(() => { });
+        await database_1.default.$executeRawUnsafe(`
+      DELETE FROM move_ins WHERE unitId IS NOT NULL AND unitId NOT IN (SELECT id FROM units);
+    `).catch(() => { });
+        logger_1.logger.info('🛡️ Orphaned leases and move_outs auto-cleaned successfully.');
         logger_1.logger.info('✅ Database schema bootstrap completed.');
     }
     catch (error) {

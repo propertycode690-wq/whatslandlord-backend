@@ -96,7 +96,7 @@ class RestoreBinController {
         try {
             await RestoreBinController.ensureTable();
             const companyId = req.user?.companyId;
-            const { entityType, entityId, title, subtitle, data, deletedBy } = req.body;
+            const { entityType, entityId, title, subtitle, data, deletedBy, deletedAt } = req.body;
             if (!entityType || !entityId) {
                 throw new appError_1.AppError('entityType and entityId are required', 400);
             }
@@ -115,8 +115,9 @@ class RestoreBinController {
                 'Property Manager';
             const serializedData = typeof data === 'string' ? data : JSON.stringify(data || {});
             const now = new Date();
+            const itemDeletedAt = deletedAt ? new Date(deletedAt) : now;
             await database_1.default.$executeRawUnsafe(`INSERT INTO restore_bin (id, entityType, entityId, title, subtitle, data, deletedBy, companyId, createdAt, deletedAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, id, entityType, entityId, title || `${entityType} #${entityId.substring(0, 8)}`, subtitle || '', serializedData, userIdentifier, companyId || null, now, now);
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, id, entityType, entityId, title || `${entityType} #${entityId.substring(0, 8)}`, subtitle || '', serializedData, userIdentifier, companyId || null, now, itemDeletedAt);
             // Perform soft delete on the source entity if applicable
             try {
                 if (entityType === 'Property') {

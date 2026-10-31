@@ -99,7 +99,7 @@ export class RestoreBinController {
     try {
       await RestoreBinController.ensureTable();
       const companyId = req.user?.companyId;
-      const { entityType, entityId, title, subtitle, data, deletedBy } = req.body;
+      const { entityType, entityId, title, subtitle, data, deletedBy, deletedAt } = req.body;
 
       if (!entityType || !entityId) {
         throw new AppError('entityType and entityId are required', 400);
@@ -125,6 +125,7 @@ export class RestoreBinController {
         'Property Manager';
       const serializedData = typeof data === 'string' ? data : JSON.stringify(data || {});
       const now = new Date();
+      const itemDeletedAt = deletedAt ? new Date(deletedAt) : now;
 
       await prisma.$executeRawUnsafe(
         `INSERT INTO restore_bin (id, entityType, entityId, title, subtitle, data, deletedBy, companyId, createdAt, deletedAt)
@@ -138,7 +139,7 @@ export class RestoreBinController {
         userIdentifier,
         companyId || null,
         now,
-        now
+        itemDeletedAt
       );
 
       // Perform soft delete on the source entity if applicable

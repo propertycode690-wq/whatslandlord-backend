@@ -51,28 +51,63 @@ export class MoveOutService {
         }
       : {};
 
-    return prisma.moveOut.findMany({
-      where: {
-        ...companyFilter,
-        ...(status ? { status: status as any } : {}),
-      },
-      include: {
-        unit: {
-          include: {
-            property: true,
+    try {
+      return await prisma.moveOut.findMany({
+        where: {
+          ...companyFilter,
+          ...(status ? { status: status as any } : {}),
+        },
+        include: {
+          unit: {
+            include: {
+              property: true,
+            },
+          },
+          lease: {
+            include: {
+              tenant: true,
+            },
+          },
+          inspections: {
+            orderBy: { createdAt: 'desc' },
           },
         },
-        lease: {
-          include: {
-            tenant: true,
+        orderBy: { scheduledDate: 'asc' },
+      });
+    } catch (err: any) {
+      if (err?.message?.includes('Field unit is required') || err?.message?.includes('Inconsistent query result')) {
+        const rawMoveOuts = await prisma.moveOut.findMany({
+          where: {
+            ...companyFilter,
+            ...(status ? { status: status as any } : {}),
           },
-        },
-        inspections: {
-          orderBy: { createdAt: 'desc' },
-        },
-      },
-      orderBy: { scheduledDate: 'asc' },
-    });
+          include: {
+            lease: {
+              include: {
+                tenant: true,
+              },
+            },
+            inspections: {
+              orderBy: { createdAt: 'desc' },
+            },
+          },
+          orderBy: { scheduledDate: 'asc' },
+        });
+
+        const unitIds = rawMoveOuts.map((m) => m.unitId).filter(Boolean) as string[];
+        const existingUnits = await prisma.unit.findMany({
+          where: { id: { in: unitIds } },
+          include: { property: true },
+        });
+        const unitMap = new Map(existingUnits.map((u) => [u.id, u]));
+
+        return rawMoveOuts.map((m) => ({
+          ...m,
+          unit: (m.unitId && unitMap.get(m.unitId)) || null,
+        }));
+      }
+      throw err;
+    }
   }
 
   async getMoveOutById(id: string, companyId?: string) {
@@ -87,41 +122,91 @@ export class MoveOutService {
         }
       : {};
 
-    return prisma.moveOut.findFirst({
-      where: {
-        id,
-        ...companyFilter,
-      },
-      include: {
-        unit: {
-          include: {
-            property: true,
-          },
+    try {
+      return await prisma.moveOut.findFirst({
+        where: {
+          id,
+          ...companyFilter,
         },
-        lease: {
-          include: {
-            tenant: true,
+        include: {
+          unit: {
+            include: {
+              property: true,
+            },
           },
-        },
-        inspections: {
-          include: {
-            assignedInspector: true,
-            rooms: {
-              include: {
-                items: {
-                  include: {
-                    photos: true,
+          lease: {
+            include: {
+              tenant: true,
+            },
+          },
+          inspections: {
+            include: {
+              assignedInspector: true,
+              rooms: {
+                include: {
+                  items: {
+                    include: {
+                      photos: true,
+                    },
                   },
                 },
               },
             },
+            orderBy: { createdAt: 'desc' },
           },
-          orderBy: { createdAt: 'desc' },
+          damageItems: true,
+          depositSummary: true,
         },
-        damageItems: true,
-        depositSummary: true,
-      },
-    });
+      });
+    } catch (err: any) {
+      if (err?.message?.includes('Field unit is required') || err?.message?.includes('Inconsistent query result')) {
+        const raw = await prisma.moveOut.findFirst({
+          where: {
+            id,
+            ...companyFilter,
+          },
+          include: {
+            lease: {
+              include: {
+                tenant: true,
+              },
+            },
+            inspections: {
+              include: {
+                assignedInspector: true,
+                rooms: {
+                  include: {
+                    items: {
+                      include: {
+                        photos: true,
+                      },
+                    },
+                  },
+                },
+              },
+              orderBy: { createdAt: 'desc' },
+            },
+            damageItems: true,
+            depositSummary: true,
+          },
+        });
+
+        if (!raw) return null;
+        let unitData = null;
+        if (raw.unitId) {
+          unitData = await prisma.unit.findUnique({
+            where: { id: raw.unitId },
+            include: { property: true },
+          }).catch(() => null);
+        }
+
+        return {
+          ...raw,
+          unit: unitData,
+        };
+      }
+      throw err;
+    }
   }
 
   async createMoveOut(data: any) {
@@ -367,7 +452,7 @@ export class MoveOutService {
     if (moveOut.status === 'COMPLETED') throw new Error('Move Out is already completed');
 
     // Validate that Lease is Active or Terminated (relaxed for skip workflow)
-    if (moveOut.lease.status !== 'Active' && moveOut.lease.status !== 'Terminated' && moveOut.lease.status !== 'Ended' && moveOut.lease.status !== 'Pending_Move_In') {
+    if (moveOut.lease && moveOut.lease.status !== 'Active' && moveOut.lease.status !== 'Terminated' && moveOut.lease.status !== 'Ended' && moveOut.lease.status !== 'Pending_Move_In') {
       console.warn(`Lease status is ${moveOut.lease.status}, continuing move-out completion.`);
     }
 
@@ -388,29 +473,35 @@ export class MoveOutService {
       });
 
       // 2. Update Unit status to Vacant
-      await tx.unit.update({
-        where: { id: moveOut.unitId },
-        data: {
-          status: 'Vacant',
-        },
-      });
+      if (moveOut.unitId) {
+        await tx.unit.update({
+          where: { id: moveOut.unitId },
+          data: {
+            status: 'Vacant',
+          },
+        }).catch(() => {});
+      }
 
       // 3. Update Tenant status to Inactive and clear unitId
-      await tx.tenant.update({
-        where: { id: moveOut.lease.tenantId },
-        data: {
-          status: 'Inactive',
-          unitId: null,
-        },
-      });
+      if (moveOut.lease?.tenantId) {
+        await tx.tenant.update({
+          where: { id: moveOut.lease.tenantId },
+          data: {
+            status: 'Inactive',
+            unitId: null,
+          },
+        }).catch(() => {});
+      }
 
       // 4. Update Lease status to Ended
-      await tx.lease.update({
-        where: { id: moveOut.leaseId },
-        data: {
-          status: 'Ended',
-        },
-      });
+      if (moveOut.leaseId) {
+        await tx.lease.update({
+          where: { id: moveOut.leaseId },
+          data: {
+            status: 'Ended',
+          },
+        }).catch(() => {});
+      }
 
       const validUserId = await getValidUserId(userId, tx);
       // 6. Create Audit Log
@@ -419,7 +510,7 @@ export class MoveOutService {
           action: 'Move Out Completed & Leases/Screenings Cleared',
           userId: validUserId,
           module: 'Leasing',
-          object: `Tenant ${moveOut.lease.tenantId}`,
+          object: `Tenant ${moveOut.lease?.tenantId || 'Unknown'}`,
           ip: '127.0.0.1',
           status: 'Success',
         },

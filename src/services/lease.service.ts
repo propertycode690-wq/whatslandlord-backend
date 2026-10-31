@@ -4,14 +4,36 @@ import { AppError } from '../utils/appError';
 
 export class LeaseService {
   async getAllLeases(companyId?: string) {
-    return prisma.lease.findMany({
-      where: companyId ? { companyId } : {},
-      include: {
-        tenant: true,
-        property: true,
-        unit: true,
-      },
-    });
+    try {
+      return await prisma.lease.findMany({
+        where: companyId ? { companyId } : {},
+        include: {
+          tenant: true,
+          property: true,
+          unit: true,
+        },
+      });
+    } catch (err: any) {
+      if (err?.message?.includes('Field unit is required') || err?.message?.includes('Inconsistent query result')) {
+        const rawLeases = await prisma.lease.findMany({
+          where: companyId ? { companyId } : {},
+          include: {
+            tenant: true,
+            property: true,
+          },
+        });
+        const unitIds = rawLeases.map((l) => l.unitId).filter(Boolean) as string[];
+        const existingUnits = await prisma.unit.findMany({
+          where: { id: { in: unitIds } },
+        });
+        const unitMap = new Map(existingUnits.map((u) => [u.id, u]));
+        return rawLeases.map((l) => ({
+          ...l,
+          unit: (l.unitId && unitMap.get(l.unitId)) || null,
+        }));
+      }
+      throw err;
+    }
   }
 
   async createLease(data: any) {

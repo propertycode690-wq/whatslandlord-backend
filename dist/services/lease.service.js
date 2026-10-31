@@ -9,14 +9,37 @@ const auditHelper_1 = require("../utils/auditHelper");
 const appError_1 = require("../utils/appError");
 class LeaseService {
     async getAllLeases(companyId) {
-        return database_1.default.lease.findMany({
-            where: companyId ? { companyId } : {},
-            include: {
-                tenant: true,
-                property: true,
-                unit: true,
-            },
-        });
+        try {
+            return await database_1.default.lease.findMany({
+                where: companyId ? { companyId } : {},
+                include: {
+                    tenant: true,
+                    property: true,
+                    unit: true,
+                },
+            });
+        }
+        catch (err) {
+            if (err?.message?.includes('Field unit is required') || err?.message?.includes('Inconsistent query result')) {
+                const rawLeases = await database_1.default.lease.findMany({
+                    where: companyId ? { companyId } : {},
+                    include: {
+                        tenant: true,
+                        property: true,
+                    },
+                });
+                const unitIds = rawLeases.map((l) => l.unitId).filter(Boolean);
+                const existingUnits = await database_1.default.unit.findMany({
+                    where: { id: { in: unitIds } },
+                });
+                const unitMap = new Map(existingUnits.map((u) => [u.id, u]));
+                return rawLeases.map((l) => ({
+                    ...l,
+                    unit: (l.unitId && unitMap.get(l.unitId)) || null,
+                }));
+            }
+            throw err;
+        }
     }
     async createLease(data) {
         return database_1.default.$transaction(async (tx) => {
