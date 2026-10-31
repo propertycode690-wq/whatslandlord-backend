@@ -106,7 +106,13 @@ async function bootstrapDb() {
         await database_1.default.$executeRawUnsafe(`
       DELETE FROM move_ins WHERE unitId IS NOT NULL AND unitId NOT IN (SELECT id FROM units);
     `).catch(() => { });
-        logger_1.logger.info('🛡️ Orphaned leases and move_outs auto-cleaned successfully.');
+        await database_1.default.$executeRawUnsafe(`
+      DELETE FROM rent_payments WHERE leaseId IS NOT NULL AND leaseId NOT IN (SELECT id FROM leases);
+    `).catch(() => { });
+        await database_1.default.$executeRawUnsafe(`
+      DELETE FROM rent_payments WHERE unitId IS NOT NULL AND unitId NOT IN (SELECT id FROM units);
+    `).catch(() => { });
+        logger_1.logger.info('🛡️ Orphaned leases, move_outs, and rent_payments auto-cleaned successfully.');
         logger_1.logger.info('✅ Database schema bootstrap completed.');
     }
     catch (error) {

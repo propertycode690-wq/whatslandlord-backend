@@ -251,10 +251,10 @@ model Lease {
 
 model RentPayment {
   id              String        @id @default(uuid())
-  tenantId        String
-  propertyId      String
-  unitId          String
-  leaseId         String
+  tenantId        String?
+  propertyId      String?
+  unitId          String?
+  leaseId         String?
   amount          Float
   dueDate         DateTime
   paidDate        DateTime?
@@ -264,10 +264,10 @@ model RentPayment {
   createdBy       String        @default("System")
   companyId       String?
   company         Company?      @relation(fields: [companyId], references: [id])
-  lease           Lease         @relation(fields: [leaseId], references: [id])
-  property        Property      @relation(fields: [propertyId], references: [id])
-  tenant          Tenant        @relation(fields: [tenantId], references: [id])
-  unit            Unit          @relation(fields: [unitId], references: [id])
+  lease           Lease?        @relation(fields: [leaseId], references: [id])
+  property        Property?     @relation(fields: [propertyId], references: [id])
+  tenant          Tenant?       @relation(fields: [tenantId], references: [id])
+  unit            Unit?         @relation(fields: [unitId], references: [id])
 
   @@index([companyId], map: "rent_payments_companyId_fkey")
   @@index([leaseId], map: "rent_payments_leaseId_fkey")

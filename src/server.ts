@@ -110,7 +110,13 @@ async function bootstrapDb() {
     await prisma.$executeRawUnsafe(`
       DELETE FROM move_ins WHERE unitId IS NOT NULL AND unitId NOT IN (SELECT id FROM units);
     `).catch(() => {});
-    logger.info('🛡️ Orphaned leases and move_outs auto-cleaned successfully.');
+    await prisma.$executeRawUnsafe(`
+      DELETE FROM rent_payments WHERE leaseId IS NOT NULL AND leaseId NOT IN (SELECT id FROM leases);
+    `).catch(() => {});
+    await prisma.$executeRawUnsafe(`
+      DELETE FROM rent_payments WHERE unitId IS NOT NULL AND unitId NOT IN (SELECT id FROM units);
+    `).catch(() => {});
+    logger.info('🛡️ Orphaned leases, move_outs, and rent_payments auto-cleaned successfully.');
 
     logger.info('✅ Database schema bootstrap completed.');
   } catch (error) {

@@ -267,18 +267,55 @@ export class PaymentService {
       }
     }
 
-    return prisma.rentPayment.findMany({
-      where: whereClause,
-      include: {
-        tenant: true,
-        property: true,
-        unit: true,
-        lease: true,
-      },
-      orderBy: {
-        paidDate: 'desc',
-      },
-    });
+    try {
+      return await prisma.rentPayment.findMany({
+        where: whereClause,
+        include: {
+          tenant: true,
+          property: true,
+          unit: true,
+          lease: true,
+        },
+        orderBy: {
+          paidDate: 'desc',
+        },
+      });
+    } catch (err: any) {
+      if (err?.message?.includes('Field') || err?.message?.includes('Inconsistent query result')) {
+        const rawPayments = await prisma.rentPayment.findMany({
+          where: whereClause,
+          orderBy: {
+            paidDate: 'desc',
+          },
+        });
+
+        const tenantIds = rawPayments.map((p) => p.tenantId).filter(Boolean) as string[];
+        const propertyIds = rawPayments.map((p) => p.propertyId).filter(Boolean) as string[];
+        const unitIds = rawPayments.map((p) => p.unitId).filter(Boolean) as string[];
+        const leaseIds = rawPayments.map((p) => p.leaseId).filter(Boolean) as string[];
+
+        const [tenants, properties, units, leases] = await Promise.all([
+          tenantIds.length ? prisma.tenant.findMany({ where: { id: { in: tenantIds } } }) : [],
+          propertyIds.length ? prisma.property.findMany({ where: { id: { in: propertyIds } } }) : [],
+          unitIds.length ? prisma.unit.findMany({ where: { id: { in: unitIds } } }) : [],
+          leaseIds.length ? prisma.lease.findMany({ where: { id: { in: leaseIds } } }) : [],
+        ]);
+
+        const tenantMap = new Map(tenants.map((t) => [t.id, t]));
+        const propMap = new Map(properties.map((p) => [p.id, p]));
+        const unitMap = new Map(units.map((u) => [u.id, u]));
+        const leaseMap = new Map(leases.map((l) => [l.id, l]));
+
+        return rawPayments.map((p) => ({
+          ...p,
+          tenant: (p.tenantId && tenantMap.get(p.tenantId)) || null,
+          property: (p.propertyId && propMap.get(p.propertyId)) || null,
+          unit: (p.unitId && unitMap.get(p.unitId)) || null,
+          lease: (p.leaseId && leaseMap.get(p.leaseId)) || null,
+        }));
+      }
+      throw err;
+    }
   }
 
   async processPayment(data: any) {

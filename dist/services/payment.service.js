@@ -272,18 +272,52 @@ class PaymentService {
                 return [];
             }
         }
-        return database_1.default.rentPayment.findMany({
-            where: whereClause,
-            include: {
-                tenant: true,
-                property: true,
-                unit: true,
-                lease: true,
-            },
-            orderBy: {
-                paidDate: 'desc',
-            },
-        });
+        try {
+            return await database_1.default.rentPayment.findMany({
+                where: whereClause,
+                include: {
+                    tenant: true,
+                    property: true,
+                    unit: true,
+                    lease: true,
+                },
+                orderBy: {
+                    paidDate: 'desc',
+                },
+            });
+        }
+        catch (err) {
+            if (err?.message?.includes('Field') || err?.message?.includes('Inconsistent query result')) {
+                const rawPayments = await database_1.default.rentPayment.findMany({
+                    where: whereClause,
+                    orderBy: {
+                        paidDate: 'desc',
+                    },
+                });
+                const tenantIds = rawPayments.map((p) => p.tenantId).filter(Boolean);
+                const propertyIds = rawPayments.map((p) => p.propertyId).filter(Boolean);
+                const unitIds = rawPayments.map((p) => p.unitId).filter(Boolean);
+                const leaseIds = rawPayments.map((p) => p.leaseId).filter(Boolean);
+                const [tenants, properties, units, leases] = await Promise.all([
+                    tenantIds.length ? database_1.default.tenant.findMany({ where: { id: { in: tenantIds } } }) : [],
+                    propertyIds.length ? database_1.default.property.findMany({ where: { id: { in: propertyIds } } }) : [],
+                    unitIds.length ? database_1.default.unit.findMany({ where: { id: { in: unitIds } } }) : [],
+                    leaseIds.length ? database_1.default.lease.findMany({ where: { id: { in: leaseIds } } }) : [],
+                ]);
+                const tenantMap = new Map(tenants.map((t) => [t.id, t]));
+                const propMap = new Map(properties.map((p) => [p.id, p]));
+                const unitMap = new Map(units.map((u) => [u.id, u]));
+                const leaseMap = new Map(leases.map((l) => [l.id, l]));
+                return rawPayments.map((p) => ({
+                    ...p,
+                    tenant: (p.tenantId && tenantMap.get(p.tenantId)) || null,
+                    property: (p.propertyId && propMap.get(p.propertyId)) || null,
+                    unit: (p.unitId && unitMap.get(p.unitId)) || null,
+                    lease: (p.leaseId && leaseMap.get(p.leaseId)) || null,
+                }));
+            }
+            throw err;
+        }
     }
     async processPayment(data) {
         let tenantId = data.tenantId;
