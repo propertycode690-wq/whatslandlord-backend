@@ -24,13 +24,22 @@ class RestoreBinController {
           subtitle VARCHAR(255) NULL,
           data LONGTEXT NOT NULL,
           deletedBy VARCHAR(191) NULL,
+          deletedByUserId VARCHAR(191) NULL,
+          deletedByEmail VARCHAR(191) NULL,
           companyId VARCHAR(191) NULL,
           createdAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
           deletedAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
           INDEX idx_rb_company (companyId),
+          INDEX idx_rb_user (deletedByUserId),
           INDEX idx_rb_entity (entityType, entityId)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
       `);
+            await database_1.default.$executeRawUnsafe(`
+        ALTER TABLE restore_bin ADD COLUMN deletedByUserId VARCHAR(191) NULL;
+      `).catch(() => { });
+            await database_1.default.$executeRawUnsafe(`
+        ALTER TABLE restore_bin ADD COLUMN deletedByEmail VARCHAR(191) NULL;
+      `).catch(() => { });
             this.tableEnsured = true;
         }
         catch (e) {
@@ -41,12 +50,25 @@ class RestoreBinController {
         try {
             await RestoreBinController.ensureTable();
             const companyId = req.user?.companyId;
+            const userId = req.user?.userId;
+            const userEmail = req.user?.email;
+            const userRole = req.user?.roleName;
             const { type, search } = req.query;
             let query = 'SELECT * FROM restore_bin WHERE 1=1';
             const params = [];
+            // 1. Strict Company Isolation (Never leak across companies)
             if (companyId) {
-                query += ' AND (companyId = ? OR companyId IS NULL)';
+                query += ' AND companyId = ?';
                 params.push(companyId);
+            }
+            else {
+                query += ' AND companyId IS NULL';
+            }
+            // 2. Strict Manager Isolation (Manager A only sees items deleted by Manager A)
+            const isSuperOrAdmin = userRole === 'Super Admin' || userRole === 'Admin' || userRole === 'Company Admin';
+            if (!isSuperOrAdmin && (userId || userEmail)) {
+                query += ' AND (deletedByUserId = ? OR deletedByEmail = ? OR (deletedByUserId IS NULL AND deletedBy = ?))';
+                params.push(userId || '', userEmail || '', userEmail || '');
             }
             if (type && type !== 'all' && type !== 'All') {
                 query += ' AND entityType = ?';
@@ -80,6 +102,8 @@ class RestoreBinController {
                     title: item.title,
                     subtitle: item.subtitle,
                     deletedBy: item.deletedBy || 'Property Manager',
+                    deletedByUserId: item.deletedByUserId,
+                    deletedByEmail: item.deletedByEmail,
                     companyId: item.companyId,
                     deletedAt: item.deletedAt,
                     createdAt: item.createdAt,
@@ -109,15 +133,17 @@ class RestoreBinController {
             }
             const id = (0, uuid_1.v4)();
             const userObj = req.user;
+            const userId = req.user?.userId || null;
+            const userEmail = req.user?.email || null;
             const userIdentifier = deletedBy ||
                 (userObj ? `${userObj.firstName || ''} ${userObj.lastName || ''}`.trim() : '') ||
-                req.user?.email ||
+                userEmail ||
                 'Property Manager';
             const serializedData = typeof data === 'string' ? data : JSON.stringify(data || {});
             const now = new Date();
             const itemDeletedAt = deletedAt ? new Date(deletedAt) : now;
-            await database_1.default.$executeRawUnsafe(`INSERT INTO restore_bin (id, entityType, entityId, title, subtitle, data, deletedBy, companyId, createdAt, deletedAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, id, entityType, entityId, title || `${entityType} #${entityId.substring(0, 8)}`, subtitle || '', serializedData, userIdentifier, companyId || null, now, itemDeletedAt);
+            await database_1.default.$executeRawUnsafe(`INSERT INTO restore_bin (id, entityType, entityId, title, subtitle, data, deletedBy, deletedByUserId, deletedByEmail, companyId, createdAt, deletedAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, id, entityType, entityId, title || `${entityType} #${entityId.substring(0, 8)}`, subtitle || '', serializedData, userIdentifier, userId, userEmail, companyId || null, now, itemDeletedAt);
             // Perform soft delete on the source entity if applicable
             try {
                 if (entityType === 'Property') {
@@ -277,7 +303,24 @@ class RestoreBinController {
             await RestoreBinController.ensureTable();
             const id = req.params.id;
             const companyId = req.user?.companyId;
-            const items = await database_1.default.$queryRawUnsafe(`SELECT * FROM restore_bin WHERE id = ? ${companyId ? 'AND (companyId = ? OR companyId IS NULL)' : ''} LIMIT 1`, ...(companyId ? [id, companyId] : [id]));
+            const userId = req.user?.userId;
+            const userEmail = req.user?.email;
+            const userRole = req.user?.roleName;
+            let checkQuery = 'SELECT * FROM restore_bin WHERE id = ?';
+            const checkParams = [id];
+            if (companyId) {
+                checkQuery += ' AND companyId = ?';
+                checkParams.push(companyId);
+            }
+            else {
+                checkQuery += ' AND companyId IS NULL';
+            }
+            const isSuperOrAdmin = userRole === 'Super Admin' || userRole === 'Admin' || userRole === 'Company Admin';
+            if (!isSuperOrAdmin && (userId || userEmail)) {
+                checkQuery += ' AND (deletedByUserId = ? OR deletedByEmail = ? OR deletedBy = ?)';
+                checkParams.push(userId || '', userEmail || '', userEmail || '');
+            }
+            const items = await database_1.default.$queryRawUnsafe(checkQuery, ...checkParams);
             if (!items || items.length === 0) {
                 throw new appError_1.AppError('Item not found in Restore Bin', 404);
             }
@@ -334,12 +377,24 @@ class RestoreBinController {
         try {
             await RestoreBinController.ensureTable();
             const companyId = req.user?.companyId;
+            const userId = req.user?.userId;
+            const userEmail = req.user?.email;
+            const userRole = req.user?.roleName;
+            let query = 'DELETE FROM restore_bin WHERE 1=1';
+            const params = [];
             if (companyId) {
-                await database_1.default.$executeRawUnsafe(`DELETE FROM restore_bin WHERE companyId = ?`, companyId);
+                query += ' AND companyId = ?';
+                params.push(companyId);
             }
             else {
-                await database_1.default.$executeRawUnsafe(`DELETE FROM restore_bin`);
+                query += ' AND companyId IS NULL';
             }
+            const isSuperOrAdmin = userRole === 'Super Admin' || userRole === 'Admin' || userRole === 'Company Admin';
+            if (!isSuperOrAdmin && (userId || userEmail)) {
+                query += ' AND (deletedByUserId = ? OR deletedByEmail = ? OR deletedBy = ?)';
+                params.push(userId || '', userEmail || '', userEmail || '');
+            }
+            await database_1.default.$executeRawUnsafe(query, ...params);
             return (0, apiResponse_1.sendSuccess)({
                 res,
                 message: 'Restore Bin emptied permanently',

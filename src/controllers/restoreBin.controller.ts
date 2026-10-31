@@ -20,13 +20,24 @@ export class RestoreBinController {
           subtitle VARCHAR(255) NULL,
           data LONGTEXT NOT NULL,
           deletedBy VARCHAR(191) NULL,
+          deletedByUserId VARCHAR(191) NULL,
+          deletedByEmail VARCHAR(191) NULL,
           companyId VARCHAR(191) NULL,
           createdAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
           deletedAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
           INDEX idx_rb_company (companyId),
+          INDEX idx_rb_user (deletedByUserId),
           INDEX idx_rb_entity (entityType, entityId)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
       `);
+
+      await prisma.$executeRawUnsafe(`
+        ALTER TABLE restore_bin ADD COLUMN deletedByUserId VARCHAR(191) NULL;
+      `).catch(() => {});
+      await prisma.$executeRawUnsafe(`
+        ALTER TABLE restore_bin ADD COLUMN deletedByEmail VARCHAR(191) NULL;
+      `).catch(() => {});
+
       this.tableEnsured = true;
     } catch (e) {
       console.error('Failed to ensure restore_bin table:', e);
@@ -37,14 +48,27 @@ export class RestoreBinController {
     try {
       await RestoreBinController.ensureTable();
       const companyId = req.user?.companyId;
+      const userId = req.user?.userId;
+      const userEmail = req.user?.email;
+      const userRole = (req.user as any)?.roleName;
       const { type, search } = req.query;
 
       let query = 'SELECT * FROM restore_bin WHERE 1=1';
       const params: any[] = [];
 
+      // 1. Strict Company Isolation (Never leak across companies)
       if (companyId) {
-        query += ' AND (companyId = ? OR companyId IS NULL)';
+        query += ' AND companyId = ?';
         params.push(companyId);
+      } else {
+        query += ' AND companyId IS NULL';
+      }
+
+      // 2. Strict Manager Isolation (Manager A only sees items deleted by Manager A)
+      const isSuperOrAdmin = userRole === 'Super Admin' || userRole === 'Admin' || userRole === 'Company Admin';
+      if (!isSuperOrAdmin && (userId || userEmail)) {
+        query += ' AND (deletedByUserId = ? OR deletedByEmail = ? OR (deletedByUserId IS NULL AND deletedBy = ?))';
+        params.push(userId || '', userEmail || '', userEmail || '');
       }
 
       if (type && type !== 'all' && type !== 'All') {
@@ -82,6 +106,8 @@ export class RestoreBinController {
           title: item.title,
           subtitle: item.subtitle,
           deletedBy: item.deletedBy || 'Property Manager',
+          deletedByUserId: item.deletedByUserId,
+          deletedByEmail: item.deletedByEmail,
           companyId: item.companyId,
           deletedAt: item.deletedAt,
           createdAt: item.createdAt,
@@ -118,18 +144,20 @@ export class RestoreBinController {
 
       const id = uuidv4();
       const userObj = req.user as any;
+      const userId = req.user?.userId || null;
+      const userEmail = req.user?.email || null;
       const userIdentifier =
         deletedBy ||
         (userObj ? `${userObj.firstName || ''} ${userObj.lastName || ''}`.trim() : '') ||
-        req.user?.email ||
+        userEmail ||
         'Property Manager';
       const serializedData = typeof data === 'string' ? data : JSON.stringify(data || {});
       const now = new Date();
       const itemDeletedAt = deletedAt ? new Date(deletedAt) : now;
 
       await prisma.$executeRawUnsafe(
-        `INSERT INTO restore_bin (id, entityType, entityId, title, subtitle, data, deletedBy, companyId, createdAt, deletedAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO restore_bin (id, entityType, entityId, title, subtitle, data, deletedBy, deletedByUserId, deletedByEmail, companyId, createdAt, deletedAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         id,
         entityType,
         entityId,
@@ -137,6 +165,8 @@ export class RestoreBinController {
         subtitle || '',
         serializedData,
         userIdentifier,
+        userId,
+        userEmail,
         companyId || null,
         now,
         itemDeletedAt
@@ -301,11 +331,27 @@ export class RestoreBinController {
       await RestoreBinController.ensureTable();
       const id = req.params.id as string;
       const companyId = req.user?.companyId;
+      const userId = req.user?.userId;
+      const userEmail = req.user?.email;
+      const userRole = (req.user as any)?.roleName;
 
-      const items: any[] = await prisma.$queryRawUnsafe(
-        `SELECT * FROM restore_bin WHERE id = ? ${companyId ? 'AND (companyId = ? OR companyId IS NULL)' : ''} LIMIT 1`,
-        ...(companyId ? [id, companyId] : [id])
-      );
+      let checkQuery = 'SELECT * FROM restore_bin WHERE id = ?';
+      const checkParams: any[] = [id];
+
+      if (companyId) {
+        checkQuery += ' AND companyId = ?';
+        checkParams.push(companyId);
+      } else {
+        checkQuery += ' AND companyId IS NULL';
+      }
+
+      const isSuperOrAdmin = userRole === 'Super Admin' || userRole === 'Admin' || userRole === 'Company Admin';
+      if (!isSuperOrAdmin && (userId || userEmail)) {
+        checkQuery += ' AND (deletedByUserId = ? OR deletedByEmail = ? OR deletedBy = ?)';
+        checkParams.push(userId || '', userEmail || '', userEmail || '');
+      }
+
+      const items: any[] = await prisma.$queryRawUnsafe(checkQuery, ...checkParams);
 
       if (!items || items.length === 0) {
         throw new AppError('Item not found in Restore Bin', 404);
@@ -358,12 +404,27 @@ export class RestoreBinController {
     try {
       await RestoreBinController.ensureTable();
       const companyId = req.user?.companyId;
+      const userId = req.user?.userId;
+      const userEmail = req.user?.email;
+      const userRole = (req.user as any)?.roleName;
+
+      let query = 'DELETE FROM restore_bin WHERE 1=1';
+      const params: any[] = [];
 
       if (companyId) {
-        await prisma.$executeRawUnsafe(`DELETE FROM restore_bin WHERE companyId = ?`, companyId);
+        query += ' AND companyId = ?';
+        params.push(companyId);
       } else {
-        await prisma.$executeRawUnsafe(`DELETE FROM restore_bin`);
+        query += ' AND companyId IS NULL';
       }
+
+      const isSuperOrAdmin = userRole === 'Super Admin' || userRole === 'Admin' || userRole === 'Company Admin';
+      if (!isSuperOrAdmin && (userId || userEmail)) {
+        query += ' AND (deletedByUserId = ? OR deletedByEmail = ? OR deletedBy = ?)';
+        params.push(userId || '', userEmail || '', userEmail || '');
+      }
+
+      await prisma.$executeRawUnsafe(query, ...params);
 
       return sendSuccess({
         res,
