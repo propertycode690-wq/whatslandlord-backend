@@ -105,7 +105,7 @@ class ReportService {
                 unitId: l.unitId,
                 tenantId: l.tenantId,
                 propertyName: l.property?.name || 'Property',
-                unitNumber: l.unit?.unitNumber ? `Unit ${l.unit.unitNumber}` : 'Unit 101',
+                unitNumber: l.unit?.unitNumber ? (l.unit.unitNumber.toString().trim().toLowerCase().startsWith('unit') ? l.unit.unitNumber.toString().trim() : `Unit ${l.unit.unitNumber.toString().trim()}`) : 'Unit 101',
                 tenantName: l.tenant ? `${l.tenant.firstName} ${l.tenant.lastName}` : 'Resident',
                 startDate: l.startDate ? new Date(l.startDate).toISOString().split('T')[0] : 'N/A',
                 endDate: l.endDate ? new Date(l.endDate).toISOString().split('T')[0] : 'N/A',
@@ -123,7 +123,7 @@ class ReportService {
                     propertyId: u.propertyId,
                     unitId: u.id,
                     propertyName: u.property?.name || 'Property',
-                    unitNumber: u.unitNumber ? `Unit ${u.unitNumber}` : 'Unit 101',
+                    unitNumber: u.unitNumber ? (u.unitNumber.toString().trim().toLowerCase().startsWith('unit') ? u.unitNumber.toString().trim() : `Unit ${u.unitNumber.toString().trim()}`) : 'Unit 101',
                     tenantName: tenantObj ? `${tenantObj.firstName} ${tenantObj.lastName}` : (u.status === 'Occupied' ? 'Tenant Assigned' : 'Vacant'),
                     startDate: u.createdAt ? new Date(u.createdAt).toISOString().split('T')[0] : 'N/A',
                     endDate: 'N/A',
@@ -238,6 +238,8 @@ class ReportService {
             propertyId: query.propertyId,
             tenantId: query.tenantId,
             status: query.status,
+            startDate: query.startDate ? new Date(query.startDate) : undefined,
+            endDate: query.endDate ? new Date(query.endDate) : undefined,
             page,
             limit,
             sortBy: query.sortBy,
@@ -405,6 +407,8 @@ class ReportService {
             propertyId: query.propertyId,
             status: query.status,
             priority: query.priority,
+            startDate: query.startDate ? new Date(query.startDate) : undefined,
+            endDate: query.endDate ? new Date(query.endDate) : undefined,
             page,
             limit,
             sortBy: query.sortBy,
@@ -417,7 +421,7 @@ class ReportService {
             return {
                 workOrderId: w.id,
                 propertyId: w.propertyId,
-                ticketId: `WO-${1001 + idx}`,
+                ticketId: w.ticketId || `WO-${1001 + idx}`,
                 propertyName: w.property?.name || w.propertyName || 'Property',
                 unitNumber: w.unitNumber || 'Unit 101',
                 issue: w.title,
@@ -428,7 +432,7 @@ class ReportService {
                 estimatedCost: est,
                 actualCost: act,
                 createdDate: w.createdAt ? new Date(w.createdAt).toISOString().split('T')[0] : 'N/A',
-                completedDate: st === 'Completed' ? (w.updatedAt ? new Date(w.updatedAt).toISOString().split('T')[0] : 'N/A') : null,
+                completedDate: (st === 'Completed' || st === 'Closed') ? (w.updatedAt ? new Date(w.updatedAt).toISOString().split('T')[0] : 'N/A') : null,
             };
         });
         return {
@@ -484,7 +488,9 @@ class ReportService {
             receiptNo: `#${idx + 1}`,
             tenantName: p.tenant ? `${p.tenant.firstName} ${p.tenant.lastName}` : (p.tenantName || 'Resident'),
             propertyName: p.property?.name || p.propertyName || 'Property',
-            unitNumber: p.unit?.unitNumber ? `Unit ${p.unit.unitNumber}` : (p.unitNumber || 'Unassigned'),
+            unitNumber: p.unit?.unitNumber
+                ? (String(p.unit.unitNumber).trim().toLowerCase().startsWith('unit') ? String(p.unit.unitNumber).trim() : `Unit ${p.unit.unitNumber}`)
+                : (p.unitNumber || 'Unassigned'),
             paymentDate: p.paidDate ? new Date(p.paidDate).toISOString().split('T')[0] : (p.createdAt ? new Date(p.createdAt).toISOString().split('T')[0] : 'N/A'),
             amount: Number(p.amount || 0),
             paymentMethod: p.paymentMethod || 'ACH',

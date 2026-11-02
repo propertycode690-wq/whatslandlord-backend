@@ -148,7 +148,7 @@ export class ReportRepository {
 
     const skip = (page - 1) * limit;
 
-    const [properties, totalRecords, allProperties] = await Promise.all([
+    const [properties, totalRecords, allUnits, activeLeases] = await Promise.all([
       prisma.property.findMany({
         where: whereClause,
         include: {
@@ -158,38 +158,50 @@ export class ReportRepository {
             },
           },
         },
+        orderBy: [
+          { units: { _count: 'desc' } },
+          { name: 'asc' },
+        ],
         skip,
         take: limit,
       }),
       prisma.property.count({ where: whereClause }),
-      prisma.property.findMany({
-        where: whereClause,
-        include: {
-          units: {
-            select: {
-              status: true,
-            },
-          },
+      prisma.unit.findMany({
+        where: {
+          propertyId: { in: activePropertyIds },
+        },
+        select: {
+          id: true,
+          status: true,
+          propertyId: true,
+        },
+      }),
+      prisma.lease.findMany({
+        where: {
+          propertyId: { in: activePropertyIds },
+          status: 'Active',
+        },
+        select: {
+          unitId: true,
         },
       }),
     ]);
 
-    let portfolioTotalUnits = 0;
+    const activeLeaseUnitSet = new Set(activeLeases.map((l) => l.unitId).filter(Boolean));
+
+    let portfolioTotalUnits = allUnits.length;
     let portfolioOccupiedUnits = 0;
-    let portfolioVacantUnits = 0;
     let portfolioMaintenanceUnits = 0;
 
-    allProperties.forEach((p) => {
-      if (p.units) {
-        portfolioTotalUnits += p.units.length;
-        p.units.forEach((u) => {
-          if (u.status === 'Occupied') portfolioOccupiedUnits++;
-          else if (u.status === 'UnderMaintenance') portfolioMaintenanceUnits++;
-          else portfolioVacantUnits++;
-        });
+    allUnits.forEach((u) => {
+      if (u.status === 'Occupied' || activeLeaseUnitSet.has(u.id)) {
+        portfolioOccupiedUnits++;
+      } else if (u.status === 'UnderMaintenance') {
+        portfolioMaintenanceUnits++;
       }
     });
 
+    const portfolioVacantUnits = Math.max(0, portfolioTotalUnits - portfolioOccupiedUnits);
     const overallOccupancyPercentage = portfolioTotalUnits > 0
       ? parseFloat(((portfolioOccupiedUnits / portfolioTotalUnits) * 100).toFixed(1))
       : 0.0;
@@ -215,12 +227,14 @@ export class ReportRepository {
     propertyId?: string;
     tenantId?: string;
     status?: string;
+    startDate?: Date;
+    endDate?: Date;
     page: number;
     limit: number;
     sortBy?: string;
     sortOrder?: 'asc' | 'desc';
   }) {
-    const { propertyIds, propertyId, tenantId, status, page, limit, sortBy, sortOrder = 'desc' } = params;
+    const { propertyIds, propertyId, tenantId, status, startDate, endDate, page, limit, sortBy, sortOrder = 'desc' } = params;
     const activePropertyIds = propertyId ? [propertyId] : propertyIds;
 
     if (activePropertyIds.length === 0) {
@@ -239,6 +253,12 @@ export class ReportRepository {
       whereClause.status = status;
     } else {
       whereClause.status = { in: ['Unpaid', 'Overdue', 'Partially Paid', 'OVERDUE', 'UNPAID', 'PARTIAL'] };
+    }
+
+    if (startDate || endDate) {
+      whereClause.dueDate = {};
+      if (startDate) whereClause.dueDate.gte = startDate;
+      if (endDate) whereClause.dueDate.lte = endDate;
     }
 
     const skip = (page - 1) * limit;
@@ -350,61 +370,134 @@ export class ReportRepository {
     propertyId?: string;
     status?: string;
     priority?: string;
+    startDate?: Date;
+    endDate?: Date;
     page: number;
     limit: number;
     sortBy?: string;
     sortOrder?: 'asc' | 'desc';
   }) {
-    const { propertyIds, propertyId, status, priority, page, limit, sortBy, sortOrder = 'desc' } = params;
+    const { propertyIds, propertyId, status, priority, startDate, endDate, page, limit, sortBy, sortOrder = 'desc' } = params;
     const activePropertyIds = propertyId ? [propertyId] : propertyIds;
 
     if (activePropertyIds.length === 0) {
       return { workOrders: [], totalRecords: 0, summary: { totalWorkOrders: 0, totalEstimatedCost: 0, totalActualCost: 0, completedCount: 0, inProgressCount: 0, openCount: 0, completionRate: 0 } };
     }
 
-    const whereClause: any = {
+    const woWhere: any = {
       propertyId: { in: activePropertyIds },
     };
 
+    const srWhere: any = {
+      OR: [
+        { propertyId: { in: activePropertyIds } },
+        ...(params.companyId ? [{ companyId: params.companyId }] : []),
+      ],
+    };
+
+    if (propertyId) {
+      woWhere.propertyId = propertyId;
+      srWhere.propertyId = propertyId;
+      delete srWhere.OR;
+    }
+
     if (status) {
       const sf = status.toLowerCase().replace(/[\s_-]/g, '');
+      let statusFilter: any;
       if (sf === 'inprogress' || sf === 'inprocess') {
-        whereClause.status = { in: ['InProgress', 'In Progress', 'in_progress', 'IN_PROGRESS', 'Assigned', 'assigned'] };
+        statusFilter = { in: ['InProgress', 'In Progress', 'in_progress', 'IN_PROGRESS', 'Assigned', 'assigned'] };
       } else if (sf === 'completed' || sf === 'closed') {
-        whereClause.status = { in: ['Completed', 'completed', 'Closed', 'closed'] };
+        statusFilter = { in: ['Completed', 'completed', 'Closed', 'closed'] };
       } else if (sf === 'notstarted' || sf === 'open' || sf === 'new') {
-        whereClause.status = { in: ['Not Started', 'not_started', 'Open', 'open', 'New', 'new', 'Pending'] };
+        statusFilter = { in: ['Not Started', 'not_started', 'Open', 'open', 'New', 'new', 'Pending'] };
       } else {
-        whereClause.status = { in: [status, status.toLowerCase(), status.toUpperCase()] };
+        statusFilter = { in: [status, status.toLowerCase(), status.toUpperCase()] };
       }
+      woWhere.status = statusFilter;
+      srWhere.status = statusFilter;
     }
 
     if (priority) {
-      whereClause.priority = priority;
+      woWhere.priority = priority;
+      srWhere.priority = { in: [priority, priority.toLowerCase(), priority.toUpperCase()] };
     }
 
-    const skip = (page - 1) * limit;
+    if (startDate || endDate) {
+      const dateFilter: any = {};
+      if (startDate) dateFilter.gte = startDate;
+      if (endDate) dateFilter.lte = endDate;
+      woWhere.createdAt = dateFilter;
+      srWhere.createdAt = dateFilter;
+    }
 
-    let orderBy: any = { createdAt: sortOrder };
-    if (sortBy === 'estimatedCost') orderBy = { estimatedCost: sortOrder };
-    if (sortBy === 'actualCost') orderBy = { actualCost: sortOrder };
-
-    const [workOrders, totalRecords, allWorkOrders] = await Promise.all([
+    const [allWorkOrders, allServiceRequests] = await Promise.all([
       prisma.workOrder.findMany({
-        where: whereClause,
+        where: woWhere,
         include: {
           property: true,
           vendor: true,
         },
-        orderBy,
-        skip,
-        take: limit,
       }),
-      prisma.workOrder.count({ where: whereClause }),
-      prisma.workOrder.findMany({
-        where: whereClause,
+      prisma.serviceRequest.findMany({
+        where: srWhere,
       }),
     ]);
+
+    const formattedWOs = allWorkOrders.map((w: any) => {
+      const est = Number(w.estimatedCost || 0);
+      const act = Number(w.actualCost || w.cost || est);
+      return {
+        id: w.id,
+        propertyId: w.propertyId,
+        propertyName: w.property?.name || w.propertyName || 'Property',
+        unitNumber: w.unitNumber || 'Unit 101',
+        title: w.title,
+        priority: w.priority || 'Medium',
+        status: w.status || 'Open',
+        assignedTechnician: w.assignedTechnician || w.vendor?.contactName || 'Unassigned',
+        vendorName: w.vendor?.companyName || w.vendorName || 'Unassigned',
+        estimatedCost: est,
+        actualCost: act,
+        cost: act,
+        createdAt: w.createdAt,
+        updatedAt: w.updatedAt,
+      };
+    });
+
+    const formattedSRs = allServiceRequests.map((sr: any) => {
+      const est = Number(sr.estimatedCost || 0);
+      const act = Number(sr.cost || sr.labourCost || est);
+      return {
+        id: sr.id,
+        propertyId: sr.propertyId,
+        propertyName: sr.propertyName || 'Property',
+        unitNumber: sr.unitNumber || 'Unit 101',
+        title: sr.title,
+        priority: sr.priority === 'Normal' ? 'Medium' : (sr.priority || 'Medium'),
+        status: sr.status || 'Open',
+        assignedTechnician: sr.assignedTechnician || sr.assignedVendorName || 'Unassigned',
+        vendorName: sr.assignedVendorName || 'Unassigned',
+        estimatedCost: est,
+        actualCost: act,
+        cost: act,
+        createdAt: sr.createdAt,
+        updatedAt: sr.updatedAt,
+      };
+    });
+
+    const combined = [...formattedSRs, ...formattedWOs];
+
+    combined.sort((a, b) => {
+      if (sortBy === 'estimatedCost') {
+        return sortOrder === 'asc' ? a.estimatedCost - b.estimatedCost : b.estimatedCost - a.estimatedCost;
+      }
+      if (sortBy === 'actualCost') {
+        return sortOrder === 'asc' ? a.actualCost - b.actualCost : b.actualCost - a.actualCost;
+      }
+      const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      return sortOrder === 'asc' ? timeA - timeB : timeB - timeA;
+    });
 
     let totalEstimatedCost = 0;
     let totalActualCost = 0;
@@ -412,24 +505,28 @@ export class ReportRepository {
     let inProgressCount = 0;
     let openCount = 0;
 
-    allWorkOrders.forEach((w: any) => {
+    combined.forEach((w: any) => {
       totalEstimatedCost += Number(w.estimatedCost || 0);
       totalActualCost += Number(w.actualCost || w.cost || 0);
 
-      if (w.status === 'Completed' || w.status === 'Closed') completedCount++;
-      else if (w.status === 'InProgress' || w.status === 'Assigned') inProgressCount++;
+      const st = (w.status || '').toLowerCase().replace(/[\s_-]/g, '');
+      if (st === 'completed' || st === 'closed') completedCount++;
+      else if (st === 'inprogress' || st === 'assigned') inProgressCount++;
       else openCount++;
     });
 
-    const completionRate = allWorkOrders.length > 0
-      ? parseFloat(((completedCount / allWorkOrders.length) * 100).toFixed(1))
+    const completionRate = combined.length > 0
+      ? parseFloat(((completedCount / combined.length) * 100).toFixed(1))
       : 0.0;
 
+    const skip = (page - 1) * limit;
+    const paginated = combined.slice(skip, skip + limit);
+
     return {
-      workOrders,
-      totalRecords,
+      workOrders: paginated,
+      totalRecords: combined.length,
       summary: {
-        totalWorkOrders: totalRecords,
+        totalWorkOrders: combined.length,
         totalEstimatedCost,
         totalActualCost: totalActualCost || totalEstimatedCost,
         completedCount,
