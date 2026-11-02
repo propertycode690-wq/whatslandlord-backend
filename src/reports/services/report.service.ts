@@ -398,7 +398,7 @@ export class ReportService {
                 }
               : {}),
           },
-          include: { property: true, tenant: true },
+          include: { property: true, tenant: true, unit: true },
         }),
         prisma.invoice.findMany({
           where: {
@@ -415,21 +415,24 @@ export class ReportService {
         }),
       ]);
 
-      // 1. Process Paid Invoices / Rent Payments as Income Transactions
+      // 1. Process Real Paid Rent Payments as Income Transactions
       let rentalRevenue = 0;
-      const seenPaymentIds = new Set<string>();
+      const seenPaymentKeys = new Set<string>();
 
-      invoices.forEach((inv) => {
-        const amt = Number(inv.paidAmount > 0 ? inv.paidAmount : inv.amount || 0);
+      payments.forEach((p) => {
+        const amt = Number(p.amount || 0);
         if (amt > 0) {
           rentalRevenue += amt;
-          seenPaymentIds.add(inv.id);
+          const dateStr = p.paidDate ? p.paidDate.toISOString().split('T')[0] : (p.dueDate ? p.dueDate.toISOString().split('T')[0] : 'N/A');
+          const dedupKey = `${p.tenantId || ''}_${amt}_${dateStr}`;
+          seenPaymentKeys.add(dedupKey);
+
           transactions.push({
-            id: inv.id,
-            date: inv.dueDate ? (inv.dueDate.includes('T') ? inv.dueDate.split('T')[0] : inv.dueDate) : (inv.createdAt ? inv.createdAt.toISOString().split('T')[0] : 'N/A'),
-            description: `Rent payment - ${inv.tenantName || 'Tenant'}`,
-            propertyName: inv.propertyName || 'Property',
-            unitNumber: inv.unitNumber ? (inv.unitNumber.toString().trim().toLowerCase().startsWith('unit') ? inv.unitNumber.toString().trim() : `Unit ${inv.unitNumber.toString().trim()}`) : '',
+            id: p.id,
+            date: dateStr,
+            description: `Rent payment - ${p.tenant ? `${p.tenant.firstName || ''} ${p.tenant.lastName || ''}`.trim() : 'Tenant'}`,
+            propertyName: p.property?.name || 'Property',
+            unitNumber: p.unit?.unitNumber ? (p.unit.unitNumber.toString().trim().toLowerCase().startsWith('unit') ? p.unit.unitNumber.toString().trim() : `Unit ${p.unit.unitNumber.toString().trim()}`) : (p.unitId || ''),
             category: 'Rental Revenue',
             type: 'Income',
             amount: amt,
@@ -437,22 +440,25 @@ export class ReportService {
         }
       });
 
-      // Include any rent payments not covered by invoices
-      payments.forEach((p) => {
-        if (!seenPaymentIds.has(p.id)) {
-          const amt = Number(p.amount || 0);
-          if (amt > 0) {
-            transactions.push({
-              id: p.id,
-              date: p.paidDate ? p.paidDate.toISOString().split('T')[0] : (p.dueDate ? p.dueDate.toISOString().split('T')[0] : 'N/A'),
-              description: `Rent payment - ${p.tenant ? `${p.tenant.firstName} ${p.tenant.lastName}` : 'Tenant'}`,
-              propertyName: p.property?.name || 'Property',
-              unitNumber: p.unitId || '',
-              category: 'Rental Revenue',
-              type: 'Income',
-              amount: amt,
-            });
-          }
+      // Include any paid invoices that were not already captured by payments
+      invoices.forEach((inv) => {
+        const amt = Number(inv.paidAmount > 0 ? inv.paidAmount : inv.amount || 0);
+        const dateStr = inv.dueDate ? (inv.dueDate.includes('T') ? inv.dueDate.split('T')[0] : inv.dueDate) : (inv.createdAt ? inv.createdAt.toISOString().split('T')[0] : 'N/A');
+        const dedupKey = `${inv.tenantId || ''}_${amt}_${dateStr}`;
+
+        if (amt > 0 && !seenPaymentKeys.has(dedupKey)) {
+          rentalRevenue += amt;
+          seenPaymentKeys.add(dedupKey);
+          transactions.push({
+            id: inv.id,
+            date: dateStr,
+            description: `Rent payment - ${inv.tenantName || 'Tenant'}`,
+            propertyName: inv.propertyName || 'Property',
+            unitNumber: inv.unitNumber ? (inv.unitNumber.toString().trim().toLowerCase().startsWith('unit') ? inv.unitNumber.toString().trim() : `Unit ${inv.unitNumber.toString().trim()}`) : '',
+            category: 'Rental Revenue',
+            type: 'Income',
+            amount: amt,
+          });
         }
       });
 
