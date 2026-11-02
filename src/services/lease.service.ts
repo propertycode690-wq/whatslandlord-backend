@@ -6,7 +6,12 @@ export class LeaseService {
   async getAllLeases(companyId?: string) {
     try {
       return await prisma.lease.findMany({
-        where: companyId ? { companyId } : {},
+        where: {
+          property: {
+            status: { notIn: ['Inactive', 'Deleted'] },
+          },
+          ...(companyId ? { companyId } : {}),
+        },
         include: {
           tenant: true,
           property: true,
@@ -16,7 +21,12 @@ export class LeaseService {
     } catch (err: any) {
       if (err?.message?.includes('Field unit is required') || err?.message?.includes('Inconsistent query result')) {
         const rawLeases = await prisma.lease.findMany({
-          where: companyId ? { companyId } : {},
+          where: {
+            property: {
+              status: { notIn: ['Inactive', 'Deleted'] },
+            },
+            ...(companyId ? { companyId } : {}),
+          },
           include: {
             tenant: true,
             property: true,

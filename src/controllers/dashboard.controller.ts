@@ -49,6 +49,9 @@ export class DashboardController {
       const activeLeases = await prisma.lease.findMany({
         where: {
           status: 'Active',
+          property: {
+            status: { notIn: ['Inactive', 'Deleted'] },
+          },
           ...(companyId ? { companyId } : {}),
         },
       });

@@ -29,6 +29,10 @@ export class ReportRepository {
       },
     };
 
+    if (params.companyId) {
+      whereClause.companyId = params.companyId;
+    }
+
     if (unitId) {
       whereClause.unitId = unitId;
     }
@@ -40,12 +44,18 @@ export class ReportRepository {
     if (leaseStatus) {
       const ls = leaseStatus.toLowerCase();
       if (ls === 'occupied' || ls === 'active') {
-        whereClause.status = { in: ['Active', 'ACTIVE', 'Occupied', 'occupied'] };
-      } else if (ls === 'vacant' || ls === 'expired' || ls === 'terminated' || ls === 'inactive') {
-        whereClause.status = { in: ['Expired', 'Terminated', 'Inactive', 'Vacant'] };
-      } else {
+        whereClause.status = 'Active';
+      } else if (ls === 'pending' || ls === 'pending_move_in') {
+        whereClause.status = 'Pending_Move_In';
+      } else if (ls === 'ended' || ls === 'expired' || ls === 'terminated') {
+        whereClause.status = { in: ['Ended', 'Expired', 'Terminated'] };
+      } else if (ls !== 'all' && ls !== 'all statuses' && ls !== 'all_statuses') {
         whereClause.status = leaseStatus;
+      } else {
+        whereClause.status = 'Active';
       }
+    } else {
+      whereClause.status = 'Active';
     }
 
     if (search) {
@@ -68,7 +78,7 @@ export class ReportRepository {
     if (sortBy === 'rentAmount') orderBy = { rentAmount: sortOrder };
     if (sortBy === 'depositAmount') orderBy = { depositAmount: sortOrder };
 
-    const [leases, totalRecords, allLeases, allUnits] = await Promise.all([
+    const [leases, totalRecords] = await Promise.all([
       prisma.lease.findMany({
         where: whereClause,
         include: {
@@ -81,47 +91,61 @@ export class ReportRepository {
         take: limit,
       }),
       prisma.lease.count({ where: whereClause }),
-      prisma.lease.findMany({
-        where: whereClause,
-        include: { property: true, unit: true, tenant: true },
-      }),
-      prisma.unit.findMany({
-        where: {
-          propertyId: { in: activePropertyIds },
-          property: {
-            status: { notIn: ['Inactive', 'Deleted'] },
-          },
-          ...(unitId ? { id: unitId } : {}),
-          ...(tenantId ? { tenants: { some: { id: tenantId } } } : {}),
-        },
-        include: { property: true, tenants: true },
-      }),
     ]);
+
+    const targetPropertyIds = propertyId ? [propertyId] : activePropertyIds;
+
+    const allActiveLeases = await prisma.lease.findMany({
+      where: {
+        propertyId: { in: targetPropertyIds },
+        property: {
+          status: { notIn: ['Inactive', 'Deleted'] },
+        },
+        ...(params.companyId ? { companyId: params.companyId } : {}),
+        status: 'Active',
+      },
+      select: {
+        rentAmount: true,
+        depositAmount: true,
+        unit: {
+          select: {
+            rentAmount: true,
+            securityDeposit: true,
+          },
+        },
+      },
+    });
+
+    const allUnits = await prisma.unit.findMany({
+      where: {
+        propertyId: { in: targetPropertyIds },
+        property: {
+          status: { notIn: ['Inactive', 'Deleted'] },
+        },
+        ...(unitId ? { id: unitId } : {}),
+        ...(tenantId ? { tenants: { some: { id: tenantId } } } : {}),
+      },
+      select: {
+        id: true,
+        status: true,
+      },
+    });
 
     let totalMonthlyRent = 0;
     let totalSecurityDeposits = 0;
-    let occupiedCount = 0;
 
-    if (allLeases.length > 0) {
-      allLeases.forEach((l) => {
-        totalMonthlyRent += Number(l.rentAmount || l.unit?.rentAmount || 0);
-        totalSecurityDeposits += Number(l.depositAmount || l.unit?.securityDeposit || 0);
-        if (l.status === 'Active' || l.unit?.status === 'Occupied') occupiedCount++;
-      });
-    } else if (allUnits.length > 0) {
-      allUnits.forEach((u) => {
-        totalMonthlyRent += Number(u.rentAmount || 0);
-        totalSecurityDeposits += Number(u.securityDeposit || 0);
-        if (u.status === 'Occupied') occupiedCount++;
-      });
-    }
+    allActiveLeases.forEach((l) => {
+      totalMonthlyRent += Number(l.rentAmount || l.unit?.rentAmount || 0);
+      totalSecurityDeposits += Number(l.depositAmount || l.unit?.securityDeposit || 0);
+    });
 
-    const totalUnitsCount = Math.max(allLeases.length, allUnits.length);
-    const vacantCount = Math.max(0, totalUnitsCount - occupiedCount);
+    const totalUnitsCount = allUnits.length > 0 ? allUnits.length : leases.length;
+    const occupiedCount = allUnits.filter((u) => u.status === 'Occupied').length;
+    const vacantCount = allUnits.filter((u) => u.status === 'Vacant').length;
 
     return {
       leases,
-      units: allLeases.length === 0 ? allUnits : [],
+      units: leases.length === 0 ? allUnits : [],
       totalRecords: totalRecords || allUnits.length,
       summary: {
         totalMonthlyRent,
@@ -244,16 +268,14 @@ export class ReportRepository {
 
     const whereClause: any = {
       propertyId: { in: activePropertyIds },
-      property: {
-        status: { notIn: ['Inactive', 'Deleted'] },
-      },
+      ...(params.companyId ? { companyId: params.companyId } : {}),
     };
 
     if (tenantId) {
       whereClause.tenantId = tenantId;
     }
 
-    if (status) {
+    if (status && status !== 'All Statuses' && status !== 'all') {
       whereClause.status = status;
     } else {
       whereClause.status = { in: ['Unpaid', 'Overdue', 'Partially Paid', 'OVERDUE', 'UNPAID', 'PARTIAL'] };
@@ -261,8 +283,8 @@ export class ReportRepository {
 
     if (startDate || endDate) {
       whereClause.dueDate = {};
-      if (startDate) whereClause.dueDate.gte = startDate;
-      if (endDate) whereClause.dueDate.lte = endDate;
+      if (startDate) whereClause.dueDate.gte = startDate instanceof Date ? startDate.toISOString().split('T')[0] : String(startDate).split('T')[0];
+      if (endDate) whereClause.dueDate.lte = endDate instanceof Date ? endDate.toISOString().split('T')[0] : String(endDate).split('T')[0];
     }
 
     const skip = (page - 1) * limit;
@@ -271,7 +293,7 @@ export class ReportRepository {
     if (sortBy === 'balance') orderBy = { balance: sortOrder };
     if (sortBy === 'amount') orderBy = { amount: sortOrder };
 
-    const [invoices, totalRecords, allDelinquentInvoices] = await Promise.all([
+    const [invoices, totalRecords] = await Promise.all([
       prisma.invoice.findMany({
         where: whereClause,
         include: {
@@ -282,11 +304,19 @@ export class ReportRepository {
         take: limit,
       }),
       prisma.invoice.count({ where: whereClause }),
-      prisma.invoice.findMany({
-        where: whereClause,
-        include: { tenant: true },
-      }),
     ]);
+
+    const allDelinquentInvoices = await prisma.invoice.findMany({
+      where: whereClause,
+      select: {
+        balance: true,
+        amount: true,
+        paidAmount: true,
+        tenantId: true,
+        tenantName: true,
+        dueDate: true,
+      },
+    });
 
     let totalDelinquentBalance = 0;
     let totalOriginalAmount = 0;
