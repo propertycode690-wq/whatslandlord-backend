@@ -2479,10 +2479,34 @@ export class PortalController {
   // --- Expenses ---
   async getExpenses(req: Request, res: Response, next: NextFunction) {
     try {
+      const companyId = (req as AuthenticatedRequest).user?.companyId;
+
+      const activeProps = await prisma.property.findMany({
+        where: {
+          ...(companyId ? { companyId } : {}),
+          status: { notIn: ['Inactive', 'Deleted'] },
+        },
+        select: { id: true },
+      });
+      const activePropertyIds = new Set(activeProps.map((p) => p.id));
+
       const expenses = await prisma.expense.findMany({
         orderBy: { date: 'desc' },
       });
-      return sendSuccess({ res, data: expenses });
+
+      const filtered = expenses.filter((e) => {
+        let parsed: any = {};
+        try { parsed = JSON.parse(e.description || '{}'); } catch {}
+        if (parsed.companyId && companyId && parsed.companyId !== companyId) {
+          return false;
+        }
+        if (parsed.propertyId) {
+          return activePropertyIds.has(parsed.propertyId);
+        }
+        return Boolean(parsed.companyId && parsed.companyId === companyId);
+      });
+
+      return sendSuccess({ res, data: filtered });
     } catch (error) {
       next(error);
     }
@@ -2501,6 +2525,10 @@ export class PortalController {
         parsedDesc = {};
       }
 
+      if (companyId && !parsedDesc.companyId) {
+        parsedDesc.companyId = companyId;
+      }
+
       const payeeType = parsedDesc.payeeType || req.body.payeeType || 'Vendor';
       const payeeId = parsedDesc.payeeId || req.body.payeeId || '';
       const propertyId = parsedDesc.propertyId || req.body.propertyId || null;
@@ -2513,7 +2541,7 @@ export class PortalController {
             category,
             amount: parsedAmount,
             date: new Date(date || Date.now()),
-            description: description || '',
+            description: JSON.stringify(parsedDesc),
           },
         });
 
@@ -2745,10 +2773,34 @@ export class PortalController {
   // --- Income ---
   async getIncome(req: Request, res: Response, next: NextFunction) {
     try {
+      const companyId = (req as AuthenticatedRequest).user?.companyId;
+
+      const activeProps = await prisma.property.findMany({
+        where: {
+          ...(companyId ? { companyId } : {}),
+          status: { notIn: ['Inactive', 'Deleted'] },
+        },
+        select: { id: true },
+      });
+      const activePropertyIds = new Set(activeProps.map((p) => p.id));
+
       const incomes = await prisma.income.findMany({
         orderBy: { date: 'desc' },
       });
-      return sendSuccess({ res, data: incomes });
+
+      const filtered = incomes.filter((i) => {
+        let parsed: any = {};
+        try { parsed = JSON.parse(i.description || '{}'); } catch {}
+        if (parsed.companyId && companyId && parsed.companyId !== companyId) {
+          return false;
+        }
+        if (parsed.propertyId) {
+          return activePropertyIds.has(parsed.propertyId);
+        }
+        return Boolean(parsed.companyId && parsed.companyId === companyId);
+      });
+
+      return sendSuccess({ res, data: filtered });
     } catch (error) {
       next(error);
     }
@@ -2757,12 +2809,24 @@ export class PortalController {
   async createIncome(req: Request, res: Response, next: NextFunction) {
     try {
       const { category, amount, date, description, status } = req.body;
+      const companyId = (req as AuthenticatedRequest).user?.companyId;
+
+      let descObj: any = {};
+      try {
+        descObj = JSON.parse(description || '{}');
+      } catch {
+        descObj = { text: description };
+      }
+      if (companyId && !descObj.companyId) {
+        descObj.companyId = companyId;
+      }
+
       const income = await prisma.income.create({
         data: {
           category,
           amount: parseFloat(amount || '0'),
           date: new Date(date || Date.now()),
-          description: description || '',
+          description: JSON.stringify(descObj),
           status: status || 'Cleared',
         },
       });

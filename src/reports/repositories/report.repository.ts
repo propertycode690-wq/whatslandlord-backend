@@ -372,10 +372,7 @@ export class ReportRepository {
     }
 
     const whereClause: any = {
-      propertyId: { in: activePropertyIds },
-      property: {
-        status: { notIn: ['Inactive', 'Deleted'] },
-      },
+      ...(params.companyId ? { journalEntry: { companyId: params.companyId } } : {}),
     };
 
     if (startDate || endDate) {
@@ -426,13 +423,12 @@ export class ReportRepository {
       property: {
         status: { notIn: ['Inactive', 'Deleted'] },
       },
+      ...(params.companyId ? { companyId: params.companyId } : {}),
     };
 
     const srWhere: any = {
       propertyId: { in: activePropertyIds },
-      property: {
-        status: { notIn: ['Inactive', 'Deleted'] },
-      },
+      ...(params.companyId ? { companyId: params.companyId } : {}),
     };
 
     if (propertyId) {
@@ -440,7 +436,7 @@ export class ReportRepository {
       srWhere.propertyId = propertyId;
     }
 
-    if (status) {
+    if (status && status !== 'All Statuses' && status !== 'all') {
       const sf = status.toLowerCase().replace(/[\s_-]/g, '');
       let statusFilter: any;
       if (sf === 'inprogress' || sf === 'inprocess') {
@@ -456,7 +452,7 @@ export class ReportRepository {
       srWhere.status = statusFilter;
     }
 
-    if (priority) {
+    if (priority && priority !== 'All Priorities' && priority !== 'all') {
       woWhere.priority = priority;
       srWhere.priority = { in: [priority, priority.toLowerCase(), priority.toUpperCase()] };
     }
@@ -618,6 +614,10 @@ export class ReportRepository {
       },
     };
 
+    if (params.companyId) {
+      whereClause.companyId = params.companyId;
+    }
+
     if (tenantId) {
       whereClause.tenantId = tenantId;
     }
@@ -663,8 +663,10 @@ export class ReportRepository {
     const methodMap: Record<string, number> = {};
 
     allPayments.forEach((p: any) => {
-      const amt = Number(p.amount || 0);
-      totalCollectedAmount += amt;
+      if (['Paid', 'PartiallyPaid', 'Cleared'].includes(p.status) || !p.status) {
+        const amt = Number(p.amount || 0);
+        totalCollectedAmount += amt;
+      }
       const m = p.paymentMethod || 'ACH';
       methodMap[m] = (methodMap[m] || 0) + 1;
     });
