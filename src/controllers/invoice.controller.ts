@@ -19,6 +19,18 @@ class InvoiceController {
 
       let whereClause: any = companyId ? { companyId } : {};
 
+      if (companyId && userRole !== 'Tenant') {
+        const activeProps = await prisma.property.findMany({
+          where: { companyId, status: { notIn: ['Inactive', 'Deleted'] } },
+          select: { id: true },
+        });
+        const activePropIds = activeProps.map((p) => p.id);
+        whereClause = {
+          companyId,
+          ...(activePropIds.length > 0 ? { propertyId: { in: activePropIds } } : {}),
+        };
+      }
+
       if (userRole === 'Tenant' && userEmail) {
         const tenant = await prisma.tenant.findFirst({
           where: { email: userEmail },
