@@ -19,7 +19,9 @@ export class ReportService {
 
     // 1. Check explicit UserAssignments for the manager/user
     const assignments = await prisma.userAssignment.findMany({
-      where: { userId: user.id },
+      where: {
+        userId: user.id,
+      },
       select: { propertyId: true },
     });
     const assignedIds = assignments
@@ -27,14 +29,24 @@ export class ReportService {
       .filter((id): id is string => Boolean(id));
 
     if (assignedIds.length > 0) {
-      return assignedIds;
+      const activeProps = await prisma.property.findMany({
+        where: {
+          id: { in: assignedIds },
+          status: { notIn: ['Inactive', 'Deleted'] },
+        },
+        select: { id: true },
+      });
+      return activeProps.map((p) => p.id);
     }
 
     // 2. Filter by Company ID if manager has a companyId
     const targetCompanyId = companyId || user?.companyId;
     if (targetCompanyId) {
       const companyProperties = await prisma.property.findMany({
-        where: { companyId: targetCompanyId },
+        where: {
+          companyId: targetCompanyId,
+          status: { notIn: ['Inactive', 'Deleted'] },
+        },
         select: { id: true },
       });
       if (companyProperties.length > 0) {
@@ -44,7 +56,10 @@ export class ReportService {
 
     // 3. Filter by Owner ID if user is a property owner
     const ownerProperties = await prisma.property.findMany({
-      where: { ownerId: user.id },
+      where: {
+        ownerId: user.id,
+        status: { notIn: ['Inactive', 'Deleted'] },
+      },
       select: { id: true },
     });
     if (ownerProperties.length > 0) {
@@ -53,12 +68,20 @@ export class ReportService {
 
     // 4. SuperAdmin or Admin role can view all properties
     if (userRole === 'SuperAdmin' || userRole === 'Admin') {
-      const allProps = await prisma.property.findMany({ select: { id: true } });
+      const allProps = await prisma.property.findMany({
+        where: {
+          status: { notIn: ['Inactive', 'Deleted'] },
+        },
+        select: { id: true },
+      });
       return allProps.map((p) => p.id);
     }
 
     // 5. Fallback for single-manager DB setups
     const properties = await prisma.property.findMany({
+      where: {
+        status: { notIn: ['Inactive', 'Deleted'] },
+      },
       select: { id: true },
     });
     return properties.map((p) => p.id);
@@ -191,19 +214,18 @@ export class ReportService {
       limit,
     });
 
-    const data = result.properties.map((p) => {
-      const totalUnits = p.units ? p.units.length : 0;
+    const data = (result.properties as any[]).map((p: any) => {
+      const validUnits = (p.units || []);
+      const totalUnits = validUnits.length;
       let occupiedUnits = 0;
       let maintenanceUnits = 0;
       let vacantUnits = 0;
 
-      if (p.units) {
-        p.units.forEach((u: any) => {
-          if (u.status === 'Occupied') occupiedUnits++;
-          else if (u.status === 'UnderMaintenance') maintenanceUnits++;
-          else vacantUnits++;
-        });
-      }
+      validUnits.forEach((u: any) => {
+        if (u.status === 'Occupied') occupiedUnits++;
+        else if (u.status === 'UnderMaintenance') maintenanceUnits++;
+        else vacantUnits++;
+      });
 
       const occupancyPercentage = totalUnits > 0 ? parseFloat(((occupiedUnits / totalUnits) * 100).toFixed(1)) : 0.0;
 

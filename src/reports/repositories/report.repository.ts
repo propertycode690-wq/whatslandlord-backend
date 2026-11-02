@@ -24,6 +24,9 @@ export class ReportRepository {
 
     const whereClause: any = {
       propertyId: { in: activePropertyIds },
+      property: {
+        status: { notIn: ['Inactive', 'Deleted'] },
+      },
     };
 
     if (unitId) {
@@ -85,6 +88,9 @@ export class ReportRepository {
       prisma.unit.findMany({
         where: {
           propertyId: { in: activePropertyIds },
+          property: {
+            status: { notIn: ['Inactive', 'Deleted'] },
+          },
           ...(unitId ? { id: unitId } : {}),
           ...(tenantId ? { tenants: { some: { id: tenantId } } } : {}),
         },
@@ -144,11 +150,12 @@ export class ReportRepository {
 
     const whereClause: any = {
       id: { in: activePropertyIds },
+      status: { notIn: ['Inactive', 'Deleted'] },
     };
 
     const skip = (page - 1) * limit;
 
-    const [properties, totalRecords, allUnits, activeLeases] = await Promise.all([
+    const [properties, totalRecords, allUnits] = await Promise.all([
       prisma.property.findMany({
         where: whereClause,
         include: {
@@ -169,6 +176,9 @@ export class ReportRepository {
       prisma.unit.findMany({
         where: {
           propertyId: { in: activePropertyIds },
+          property: {
+            status: { notIn: ['Inactive', 'Deleted'] },
+          },
         },
         select: {
           id: true,
@@ -176,32 +186,23 @@ export class ReportRepository {
           propertyId: true,
         },
       }),
-      prisma.lease.findMany({
-        where: {
-          propertyId: { in: activePropertyIds },
-          status: 'Active',
-        },
-        select: {
-          unitId: true,
-        },
-      }),
     ]);
-
-    const activeLeaseUnitSet = new Set(activeLeases.map((l) => l.unitId).filter(Boolean));
 
     let portfolioTotalUnits = allUnits.length;
     let portfolioOccupiedUnits = 0;
     let portfolioMaintenanceUnits = 0;
+    let portfolioVacantUnits = 0;
 
     allUnits.forEach((u) => {
-      if (u.status === 'Occupied' || activeLeaseUnitSet.has(u.id)) {
+      if (u.status === 'Occupied') {
         portfolioOccupiedUnits++;
       } else if (u.status === 'UnderMaintenance') {
         portfolioMaintenanceUnits++;
+      } else {
+        portfolioVacantUnits++;
       }
     });
 
-    const portfolioVacantUnits = Math.max(0, portfolioTotalUnits - portfolioOccupiedUnits);
     const overallOccupancyPercentage = portfolioTotalUnits > 0
       ? parseFloat(((portfolioOccupiedUnits / portfolioTotalUnits) * 100).toFixed(1))
       : 0.0;
@@ -243,6 +244,9 @@ export class ReportRepository {
 
     const whereClause: any = {
       propertyId: { in: activePropertyIds },
+      property: {
+        status: { notIn: ['Inactive', 'Deleted'] },
+      },
     };
 
     if (tenantId) {
@@ -339,6 +343,9 @@ export class ReportRepository {
 
     const whereClause: any = {
       propertyId: { in: activePropertyIds },
+      property: {
+        status: { notIn: ['Inactive', 'Deleted'] },
+      },
     };
 
     if (startDate || endDate) {
@@ -386,19 +393,21 @@ export class ReportRepository {
 
     const woWhere: any = {
       propertyId: { in: activePropertyIds },
+      property: {
+        status: { notIn: ['Inactive', 'Deleted'] },
+      },
     };
 
     const srWhere: any = {
-      OR: [
-        { propertyId: { in: activePropertyIds } },
-        ...(params.companyId ? [{ companyId: params.companyId }] : []),
-      ],
+      propertyId: { in: activePropertyIds },
+      property: {
+        status: { notIn: ['Inactive', 'Deleted'] },
+      },
     };
 
     if (propertyId) {
       woWhere.propertyId = propertyId;
       srWhere.propertyId = propertyId;
-      delete srWhere.OR;
     }
 
     if (status) {
@@ -574,6 +583,9 @@ export class ReportRepository {
 
     const whereClause: any = {
       propertyId: { in: activePropertyIds },
+      property: {
+        status: { notIn: ['Inactive', 'Deleted'] },
+      },
     };
 
     if (tenantId) {
