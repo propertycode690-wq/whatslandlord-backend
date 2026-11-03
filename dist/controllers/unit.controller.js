@@ -411,6 +411,8 @@ class UnitController {
                     const securityDeposit = item.securityDeposit !== undefined && item.securityDeposit !== null && !isNaN(Number(item.securityDeposit))
                         ? Number(item.securityDeposit)
                         : rentAmount;
+                    const isOccupied = item.status === 'Occupied' || Boolean(item.tenantFirstName);
+                    const unitStatus = isOccupied ? 'Occupied' : 'Vacant';
                     const createdUnit = await tx.unit.create({
                         data: {
                             propertyId: targetProp.id,
@@ -422,15 +424,359 @@ class UnitController {
                             squareFootage,
                             rentAmount,
                             securityDeposit,
-                            status: 'Vacant', // Streamlined Vacant import
+                            status: unitStatus,
                             availabilityDate: new Date(),
                         },
                     });
-                    // Increment unitsCount on Property
+                    // If Occupied with resident details, auto-create Tenant, Lease & Opening Balance Invoice
+                    if (isOccupied && item.tenantFirstName) {
+                        const tenantFirstName = String(item.tenantFirstName || '').trim();
+                        const tenantLastName = String(item.tenantLastName || '').trim() || 'Resident';
+                        const tenantFullName = `${tenantFirstName} ${tenantLastName}`.trim();
+                        const tenantEmail = String(item.tenantEmail ||
+                            `${tenantFirstName.toLowerCase()}.${unitNumStr.toLowerCase()}.${Date.now()}@tenantportal.com`).trim();
+                        const tenantPhone = String(item.tenantPhone || '555-0100').trim();
+                        let tenant = await tx.tenant.findFirst({
+                            where: { email: tenantEmail },
+                        });
+                        if (!tenant) {
+                            tenant = await tx.tenant.create({
+                                data: {
+                                    firstName: tenantFirstName,
+                                    lastName: tenantLastName,
+                                    email: tenantEmail,
+                                    phone: tenantPhone,
+                                    status: 'Active',
+                                    unitId: createdUnit.id,
+                                    companyId,
+                                },
+                            });
+                        }
+                        else {
+                            tenant = await tx.tenant.update({
+                                where: { id: tenant.id },
+                                data: {
+                                    unitId: createdUnit.id,
+                                    status: 'Active',
+                                },
+                            });
+                        }
+                        // Create Active Lease starting from Move-In Date
+                        const startDate = item.moveInDate && !isNaN(new Date(item.moveInDate).getTime())
+                            ? new Date(item.moveInDate)
+                            : new Date();
+                        const endDate = new Date(startDate);
+                        endDate.setFullYear(endDate.getFullYear() + 1);
+                        const createdLease = await tx.lease.create({
+                            data: {
+                                tenantId: tenant.id,
+                                propertyId: targetProp.id,
+                                unitId: createdUnit.id,
+                                startDate,
+                                endDate,
+                                rentAmount,
+                                depositAmount: securityDeposit,
+                                status: 'Active',
+                                companyId,
+                            },
+                        });
+                        // Determine past months from invoiceStartDate (or moveInDate)
+                        const startInvoiceDateStr = String(item.invoiceStartDate || item.moveInDate || '').trim();
+                        const getPastMonthsList = (dateStr) => {
+                            if (!dateStr)
+                                return [];
+                            const start = new Date(dateStr);
+                            if (isNaN(start.getTime()))
+                                return [];
+                            const now = new Date();
+                            let curYear = start.getFullYear();
+                            let curMonth = start.getMonth();
+                            const endYear = now.getFullYear();
+                            const endMonth = now.getMonth();
+                            if (curYear > endYear || (curYear === endYear && curMonth > endMonth)) {
+                                return [];
+                            }
+                            const months = [];
+                            while (curYear < endYear || (curYear === endYear && curMonth <= endMonth)) {
+                                const d = new Date(curYear, curMonth, 1);
+                                const id = `${curYear}-${String(curMonth + 1).padStart(2, '0')}`;
+                                const label = d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+                                const dueDate = `${curYear}-${String(curMonth + 1).padStart(2, '0')}-01`;
+                                months.push({ id, label, dueDate, monthDate: d });
+                                curMonth++;
+                                if (curMonth > 11) {
+                                    curMonth = 0;
+                                    curYear++;
+                                }
+                            }
+                            return months;
+                        };
+                        const pastMonths = getPastMonthsList(startInvoiceDateStr);
+                        const pastRentStatus = String(item.pastRentStatus || 'All Paid').trim().toLowerCase();
+                        const includeLateFee = Boolean(item.includeLateFee);
+                        let outstandingBalance = Number(item.outstandingBalance || 0);
+                        if (isNaN(outstandingBalance) || outstandingBalance < 0) {
+                            outstandingBalance = 0;
+                        }
+                        if (pastMonths.length > 0) {
+                            const totalPastRent = pastMonths.length * rentAmount;
+                            if (pastRentStatus.includes('unpaid')) {
+                                // All months unpaid / overdue
+                                for (const m of pastMonths) {
+                                    const lateFee = includeLateFee ? 50 : 0;
+                                    const totalAmt = rentAmount + lateFee;
+                                    const lineItems = [
+                                        { description: `Monthly Rent Charge - ${m.label}`, amount: rentAmount },
+                                    ];
+                                    if (lateFee > 0) {
+                                        lineItems.push({
+                                            description: 'Overdue Late Fee Charge (10-Day Policy)',
+                                            amount: lateFee,
+                                        });
+                                    }
+                                    await tx.invoice.create({
+                                        data: {
+                                            tenantId: tenant.id,
+                                            tenantName: tenantFullName,
+                                            propertyId: targetProp.id,
+                                            propertyName: targetProp.name,
+                                            unitNumber: unitNumStr,
+                                            dueDate: m.dueDate,
+                                            amount: totalAmt,
+                                            paidAmount: 0,
+                                            balance: totalAmt,
+                                            status: 'Overdue',
+                                            lineItems: JSON.stringify(lineItems),
+                                            companyId,
+                                        },
+                                    });
+                                }
+                            }
+                            else if (pastRentStatus === 'all paid' ||
+                                (outstandingBalance === 0 &&
+                                    !pastRentStatus.includes('unpaid') &&
+                                    !pastRentStatus.includes('partial') &&
+                                    !pastRentStatus.includes('custom'))) {
+                                // All months fully paid with receipts
+                                for (const m of pastMonths) {
+                                    const lineItems = [
+                                        { description: `Monthly Rent Charge - ${m.label}`, amount: rentAmount },
+                                    ];
+                                    await tx.invoice.create({
+                                        data: {
+                                            tenantId: tenant.id,
+                                            tenantName: tenantFullName,
+                                            propertyId: targetProp.id,
+                                            propertyName: targetProp.name,
+                                            unitNumber: unitNumStr,
+                                            dueDate: m.dueDate,
+                                            amount: rentAmount,
+                                            paidAmount: rentAmount,
+                                            balance: 0,
+                                            status: 'Paid',
+                                            lineItems: JSON.stringify(lineItems),
+                                            companyId,
+                                        },
+                                    });
+                                    await tx.rentPayment.create({
+                                        data: {
+                                            tenantId: tenant.id,
+                                            propertyId: targetProp.id,
+                                            unitId: createdUnit.id,
+                                            leaseId: createdLease.id,
+                                            amount: rentAmount,
+                                            dueDate: m.monthDate,
+                                            paidDate: m.monthDate,
+                                            status: 'Paid',
+                                            paymentMethod: 'Offline',
+                                            referenceNumber: `RCP-BULK-${Math.floor(100000 + Math.random() * 900000)}`,
+                                            createdBy: 'Manager',
+                                            companyId,
+                                        },
+                                    });
+                                }
+                            }
+                            else {
+                                // Partial / Custom allocation (FIFO: oldest months paid first, recent months due)
+                                let remainingPaidPool = Math.max(0, totalPastRent - outstandingBalance);
+                                const excessDebt = Math.max(0, outstandingBalance - totalPastRent);
+                                for (let i = 0; i < pastMonths.length; i++) {
+                                    const m = pastMonths[i];
+                                    const isLastMonth = i === pastMonths.length - 1;
+                                    if (remainingPaidPool >= rentAmount) {
+                                        // Fully paid month
+                                        remainingPaidPool -= rentAmount;
+                                        const lineItems = [
+                                            { description: `Monthly Rent Charge - ${m.label}`, amount: rentAmount },
+                                        ];
+                                        await tx.invoice.create({
+                                            data: {
+                                                tenantId: tenant.id,
+                                                tenantName: tenantFullName,
+                                                propertyId: targetProp.id,
+                                                propertyName: targetProp.name,
+                                                unitNumber: unitNumStr,
+                                                dueDate: m.dueDate,
+                                                amount: rentAmount,
+                                                paidAmount: rentAmount,
+                                                balance: 0,
+                                                status: 'Paid',
+                                                lineItems: JSON.stringify(lineItems),
+                                                companyId,
+                                            },
+                                        });
+                                        await tx.rentPayment.create({
+                                            data: {
+                                                tenantId: tenant.id,
+                                                propertyId: targetProp.id,
+                                                unitId: createdUnit.id,
+                                                leaseId: createdLease.id,
+                                                amount: rentAmount,
+                                                dueDate: m.monthDate,
+                                                paidDate: m.monthDate,
+                                                status: 'Paid',
+                                                paymentMethod: 'Offline',
+                                                referenceNumber: `RCP-BULK-${Math.floor(100000 + Math.random() * 900000)}`,
+                                                createdBy: 'Manager',
+                                                companyId,
+                                            },
+                                        });
+                                    }
+                                    else if (remainingPaidPool > 0) {
+                                        // Partially paid month
+                                        const monthPaid = remainingPaidPool;
+                                        remainingPaidPool = 0;
+                                        const lateFee = includeLateFee ? 50 : 0;
+                                        let totalAmt = rentAmount + lateFee;
+                                        if (isLastMonth && excessDebt > 0) {
+                                            totalAmt += excessDebt;
+                                        }
+                                        const monthBal = totalAmt - monthPaid;
+                                        const lineItems = [
+                                            { description: `Monthly Rent Charge - ${m.label}`, amount: rentAmount },
+                                        ];
+                                        if (lateFee > 0) {
+                                            lineItems.push({
+                                                description: 'Overdue Late Fee Charge (10-Day Policy)',
+                                                amount: lateFee,
+                                            });
+                                        }
+                                        if (isLastMonth && excessDebt > 0) {
+                                            lineItems.push({
+                                                description: 'Historical Opening Balance Dues',
+                                                amount: excessDebt,
+                                            });
+                                        }
+                                        await tx.invoice.create({
+                                            data: {
+                                                tenantId: tenant.id,
+                                                tenantName: tenantFullName,
+                                                propertyId: targetProp.id,
+                                                propertyName: targetProp.name,
+                                                unitNumber: unitNumStr,
+                                                dueDate: m.dueDate,
+                                                amount: totalAmt,
+                                                paidAmount: monthPaid,
+                                                balance: monthBal,
+                                                status: 'Partially Paid',
+                                                lineItems: JSON.stringify(lineItems),
+                                                companyId,
+                                            },
+                                        });
+                                        await tx.rentPayment.create({
+                                            data: {
+                                                tenantId: tenant.id,
+                                                propertyId: targetProp.id,
+                                                unitId: createdUnit.id,
+                                                leaseId: createdLease.id,
+                                                amount: monthPaid,
+                                                dueDate: m.monthDate,
+                                                paidDate: m.monthDate,
+                                                status: 'PartiallyPaid',
+                                                paymentMethod: 'Offline_Partial',
+                                                referenceNumber: `RCP-PARTIAL-${Math.floor(100000 + Math.random() * 900000)}`,
+                                                createdBy: 'Manager',
+                                                companyId,
+                                            },
+                                        });
+                                    }
+                                    else {
+                                        // Fully overdue month
+                                        const lateFee = includeLateFee ? 50 : 0;
+                                        let totalAmt = rentAmount + lateFee;
+                                        if (isLastMonth && excessDebt > 0) {
+                                            totalAmt += excessDebt;
+                                        }
+                                        const lineItems = [
+                                            { description: `Monthly Rent Charge - ${m.label}`, amount: rentAmount },
+                                        ];
+                                        if (lateFee > 0) {
+                                            lineItems.push({
+                                                description: 'Overdue Late Fee Charge (10-Day Policy)',
+                                                amount: lateFee,
+                                            });
+                                        }
+                                        if (isLastMonth && excessDebt > 0) {
+                                            lineItems.push({
+                                                description: 'Historical Opening Balance Dues',
+                                                amount: excessDebt,
+                                            });
+                                        }
+                                        await tx.invoice.create({
+                                            data: {
+                                                tenantId: tenant.id,
+                                                tenantName: tenantFullName,
+                                                propertyId: targetProp.id,
+                                                propertyName: targetProp.name,
+                                                unitNumber: unitNumStr,
+                                                dueDate: m.dueDate,
+                                                amount: totalAmt,
+                                                paidAmount: 0,
+                                                balance: totalAmt,
+                                                status: 'Overdue',
+                                                lineItems: JSON.stringify(lineItems),
+                                                companyId,
+                                            },
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                        else if (outstandingBalance > 0) {
+                            // No past months (e.g. current or future date), but has opening balance
+                            const invoiceDueDate = item.invoiceStartDate && !isNaN(new Date(item.invoiceStartDate).getTime())
+                                ? new Date(item.invoiceStartDate).toISOString().split('T')[0]
+                                : new Date().toISOString().split('T')[0];
+                            const lineItems = [
+                                { description: 'Opening Balance / Previous Dues', amount: outstandingBalance },
+                            ];
+                            if (includeLateFee) {
+                                lineItems.push({ description: 'Historical Late Fee Applied ($50)', amount: 50 });
+                            }
+                            await tx.invoice.create({
+                                data: {
+                                    tenantId: tenant.id,
+                                    tenantName: tenantFullName,
+                                    propertyId: targetProp.id,
+                                    propertyName: targetProp.name,
+                                    unitNumber: unitNumStr,
+                                    dueDate: invoiceDueDate,
+                                    amount: outstandingBalance + (includeLateFee ? 50 : 0),
+                                    paidAmount: 0,
+                                    balance: outstandingBalance + (includeLateFee ? 50 : 0),
+                                    status: 'Overdue',
+                                    lineItems: JSON.stringify(lineItems),
+                                    companyId,
+                                },
+                            });
+                        }
+                    }
+                    // Increment unitsCount (and occupiedUnits if Occupied) on Property
                     await tx.property.update({
                         where: { id: targetProp.id },
                         data: {
                             unitsCount: { increment: 1 },
+                            ...(isOccupied ? { occupiedUnits: { increment: 1 } } : {}),
                         },
                     });
                     // Increment unitsCount on Building
@@ -440,6 +786,20 @@ class UnitController {
                             unitsCount: { increment: 1 },
                         },
                     });
+                    // Recalculate occupancyRate on Property if Occupied
+                    if (isOccupied) {
+                        const updatedP = await tx.property.findUnique({
+                            where: { id: targetProp.id },
+                            select: { unitsCount: true, occupiedUnits: true },
+                        });
+                        if (updatedP && updatedP.unitsCount > 0) {
+                            const rate = Math.round((updatedP.occupiedUnits / updatedP.unitsCount) * 100);
+                            await tx.property.update({
+                                where: { id: targetProp.id },
+                                data: { occupancyRate: rate },
+                            });
+                        }
+                    }
                     importedUnits.push(createdUnit);
                 }
             }, {
