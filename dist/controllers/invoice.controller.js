@@ -19,6 +19,17 @@ class InvoiceController {
             const userRole = req.user?.roleName || req.user?.role;
             const userEmail = req.user?.email;
             let whereClause = companyId ? { companyId } : {};
+            if (companyId && userRole !== 'Tenant') {
+                const activeProps = await database_1.default.property.findMany({
+                    where: { companyId, status: { notIn: ['Inactive', 'Deleted'] } },
+                    select: { id: true },
+                });
+                const activePropIds = activeProps.map((p) => p.id);
+                whereClause = {
+                    companyId,
+                    ...(activePropIds.length > 0 ? { propertyId: { in: activePropIds } } : {}),
+                };
+            }
             if (userRole === 'Tenant' && userEmail) {
                 const tenant = await database_1.default.tenant.findFirst({
                     where: { email: userEmail },

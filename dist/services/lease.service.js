@@ -11,7 +11,12 @@ class LeaseService {
     async getAllLeases(companyId) {
         try {
             return await database_1.default.lease.findMany({
-                where: companyId ? { companyId } : {},
+                where: {
+                    property: {
+                        status: { notIn: ['Inactive', 'Deleted'] },
+                    },
+                    ...(companyId ? { companyId } : {}),
+                },
                 include: {
                     tenant: true,
                     property: true,
@@ -22,7 +27,12 @@ class LeaseService {
         catch (err) {
             if (err?.message?.includes('Field unit is required') || err?.message?.includes('Inconsistent query result')) {
                 const rawLeases = await database_1.default.lease.findMany({
-                    where: companyId ? { companyId } : {},
+                    where: {
+                        property: {
+                            status: { notIn: ['Inactive', 'Deleted'] },
+                        },
+                        ...(companyId ? { companyId } : {}),
+                    },
                     include: {
                         tenant: true,
                         property: true,

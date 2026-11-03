@@ -48,6 +48,9 @@ class DashboardController {
             const activeLeases = await database_1.default.lease.findMany({
                 where: {
                     status: 'Active',
+                    property: {
+                        status: { notIn: ['Inactive', 'Deleted'] },
+                    },
                     ...(companyId ? { companyId } : {}),
                 },
             });

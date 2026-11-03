@@ -20,20 +20,32 @@ class ReportService {
         const userRole = (user.roleName || user.role || (user.role && user.role.name) || '').toString();
         // 1. Check explicit UserAssignments for the manager/user
         const assignments = await database_1.default.userAssignment.findMany({
-            where: { userId: user.id },
+            where: {
+                userId: user.id,
+            },
             select: { propertyId: true },
         });
         const assignedIds = assignments
             .map((a) => a.propertyId)
             .filter((id) => Boolean(id));
         if (assignedIds.length > 0) {
-            return assignedIds;
+            const activeProps = await database_1.default.property.findMany({
+                where: {
+                    id: { in: assignedIds },
+                    status: { notIn: ['Inactive', 'Deleted'] },
+                },
+                select: { id: true },
+            });
+            return activeProps.map((p) => p.id);
         }
         // 2. Filter by Company ID if manager has a companyId
         const targetCompanyId = companyId || user?.companyId;
         if (targetCompanyId) {
             const companyProperties = await database_1.default.property.findMany({
-                where: { companyId: targetCompanyId },
+                where: {
+                    companyId: targetCompanyId,
+                    status: { notIn: ['Inactive', 'Deleted'] },
+                },
                 select: { id: true },
             });
             if (companyProperties.length > 0) {
@@ -42,7 +54,10 @@ class ReportService {
         }
         // 3. Filter by Owner ID if user is a property owner
         const ownerProperties = await database_1.default.property.findMany({
-            where: { ownerId: user.id },
+            where: {
+                ownerId: user.id,
+                status: { notIn: ['Inactive', 'Deleted'] },
+            },
             select: { id: true },
         });
         if (ownerProperties.length > 0) {
@@ -50,11 +65,19 @@ class ReportService {
         }
         // 4. SuperAdmin or Admin role can view all properties
         if (userRole === 'SuperAdmin' || userRole === 'Admin') {
-            const allProps = await database_1.default.property.findMany({ select: { id: true } });
+            const allProps = await database_1.default.property.findMany({
+                where: {
+                    status: { notIn: ['Inactive', 'Deleted'] },
+                },
+                select: { id: true },
+            });
             return allProps.map((p) => p.id);
         }
         // 5. Fallback for single-manager DB setups
         const properties = await database_1.default.property.findMany({
+            where: {
+                status: { notIn: ['Inactive', 'Deleted'] },
+            },
             select: { id: true },
         });
         return properties.map((p) => p.id);
@@ -176,20 +199,19 @@ class ReportService {
             limit,
         });
         const data = result.properties.map((p) => {
-            const totalUnits = p.units ? p.units.length : 0;
+            const validUnits = (p.units || []);
+            const totalUnits = validUnits.length;
             let occupiedUnits = 0;
             let maintenanceUnits = 0;
             let vacantUnits = 0;
-            if (p.units) {
-                p.units.forEach((u) => {
-                    if (u.status === 'Occupied')
-                        occupiedUnits++;
-                    else if (u.status === 'UnderMaintenance')
-                        maintenanceUnits++;
-                    else
-                        vacantUnits++;
-                });
-            }
+            validUnits.forEach((u) => {
+                if (u.status === 'Occupied')
+                    occupiedUnits++;
+                else if (u.status === 'UnderMaintenance')
+                    maintenanceUnits++;
+                else
+                    vacantUnits++;
+            });
             const occupancyPercentage = totalUnits > 0 ? parseFloat(((occupiedUnits / totalUnits) * 100).toFixed(1)) : 0.0;
             return {
                 propertyId: p.id,
@@ -326,51 +348,127 @@ class ReportService {
                 expensesMap[category] = (expensesMap[category] || 0) + expAmount;
             }
         });
+        const transactions = [];
         if (Object.keys(incomeMap).length === 0 && Object.keys(expensesMap).length === 0) {
-            const [payments, invoices, workOrders, serviceRequests, units, leases] = await Promise.all([
-                database_1.default.rentPayment.findMany({ where: propertyFilter }),
-                database_1.default.invoice.findMany({ where: propertyFilter }),
-                database_1.default.workOrder.findMany({ where: propertyFilter }),
-                database_1.default.serviceRequest.findMany({ where: propertyFilter }),
-                database_1.default.unit.findMany({ where: propertyFilter }),
-                database_1.default.lease.findMany({ where: propertyFilter }),
+            const [payments, invoices, workOrders, serviceRequests] = await Promise.all([
+                database_1.default.rentPayment.findMany({
+                    where: {
+                        ...propertyFilter,
+                        status: 'Paid',
+                        ...(startDate || endDate
+                            ? {
+                                paidDate: {
+                                    ...(startDate ? { gte: startDate } : {}),
+                                    ...(endDate ? { lte: endDate } : {}),
+                                },
+                            }
+                            : {}),
+                    },
+                    include: { property: true, tenant: true, unit: true },
+                }),
+                database_1.default.invoice.findMany({
+                    where: {
+                        ...propertyFilter,
+                        status: { in: ['Paid', 'Partially Paid'] },
+                    },
+                }),
+                database_1.default.workOrder.findMany({
+                    where: propertyFilter,
+                    include: { property: true },
+                }),
+                database_1.default.serviceRequest.findMany({
+                    where: propertyFilter,
+                }),
             ]);
-            const rentPaymentsSum = payments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
-            const paidInvoicesSum = invoices
-                .filter((i) => i.status === 'Paid' || i.status === 'Partially Paid')
-                .reduce((sum, i) => sum + Number(i.paidAmount || i.amount || 0), 0);
-            const leasesRentSum = leases.reduce((sum, l) => sum + Number(l.rentAmount || 0), 0);
-            const unitsRentSum = units.reduce((sum, u) => sum + Number(u.rentAmount || 0), 0);
-            const grossRentalIncome = Math.max(rentPaymentsSum, paidInvoicesSum, leasesRentSum, unitsRentSum);
-            if (grossRentalIncome > 0) {
-                incomeMap['Rental Revenue'] = grossRentalIncome;
-            }
-            else {
-                incomeMap['Rental Revenue'] = 0;
-            }
-            let lateFeeIncome = 0;
-            invoices.forEach((inv) => {
-                if (Array.isArray(inv.lineItems)) {
-                    inv.lineItems.forEach((li) => {
-                        if (li.description && li.description.toLowerCase().includes('late fee')) {
-                            lateFeeIncome += Number(li.amount || 0);
-                        }
+            // 1. Process Real Paid Rent Payments as Income Transactions
+            let rentalRevenue = 0;
+            const seenPaymentKeys = new Set();
+            payments.forEach((p) => {
+                const amt = Number(p.amount || 0);
+                if (amt > 0) {
+                    rentalRevenue += amt;
+                    const dateStr = p.paidDate ? p.paidDate.toISOString().split('T')[0] : (p.dueDate ? p.dueDate.toISOString().split('T')[0] : 'N/A');
+                    const dedupKey = `${p.tenantId || ''}_${amt}_${dateStr}`;
+                    seenPaymentKeys.add(dedupKey);
+                    transactions.push({
+                        id: p.id,
+                        date: dateStr,
+                        description: `Rent payment - ${p.tenant ? `${p.tenant.firstName || ''} ${p.tenant.lastName || ''}`.trim() : 'Tenant'}`,
+                        propertyName: p.property?.name || 'Property',
+                        unitNumber: p.unit?.unitNumber ? (p.unit.unitNumber.toString().trim().toLowerCase().startsWith('unit') ? p.unit.unitNumber.toString().trim() : `Unit ${p.unit.unitNumber.toString().trim()}`) : (p.unitId || ''),
+                        category: 'Rental Revenue',
+                        type: 'Income',
+                        amount: amt,
                     });
                 }
             });
-            if (lateFeeIncome > 0) {
-                incomeMap['Late Fee Income'] = lateFeeIncome;
+            // Include any paid invoices that were not already captured by payments
+            invoices.forEach((inv) => {
+                const amt = Number(inv.paidAmount > 0 ? inv.paidAmount : inv.amount || 0);
+                const dateStr = inv.dueDate ? (inv.dueDate.includes('T') ? inv.dueDate.split('T')[0] : inv.dueDate) : (inv.createdAt ? inv.createdAt.toISOString().split('T')[0] : 'N/A');
+                const dedupKey = `${inv.tenantId || ''}_${amt}_${dateStr}`;
+                if (amt > 0 && !seenPaymentKeys.has(dedupKey)) {
+                    rentalRevenue += amt;
+                    seenPaymentKeys.add(dedupKey);
+                    transactions.push({
+                        id: inv.id,
+                        date: dateStr,
+                        description: `Rent payment - ${inv.tenantName || 'Tenant'}`,
+                        propertyName: inv.propertyName || 'Property',
+                        unitNumber: inv.unitNumber ? (inv.unitNumber.toString().trim().toLowerCase().startsWith('unit') ? inv.unitNumber.toString().trim() : `Unit ${inv.unitNumber.toString().trim()}`) : '',
+                        category: 'Rental Revenue',
+                        type: 'Income',
+                        amount: amt,
+                    });
+                }
+            });
+            if (rentalRevenue > 0) {
+                incomeMap['Rental Revenue'] = rentalRevenue;
             }
-            const workOrdersCost = workOrders.reduce((sum, w) => sum + Number(w.actualCost || w.cost || w.estimatedCost || 0), 0);
-            const serviceRequestsCost = serviceRequests.reduce((sum, s) => sum + Number(s.cost || s.estimatedCost || 0), 0);
-            const totalMaintenance = workOrdersCost + serviceRequestsCost;
+            // 2. Process Service Requests & Work Orders as Expense Transactions
+            let totalMaintenance = 0;
+            serviceRequests.forEach((sr) => {
+                const cost = Number(sr.cost || sr.estimatedCost || 0);
+                if (cost > 0) {
+                    totalMaintenance += cost;
+                    transactions.push({
+                        id: sr.id,
+                        date: sr.createdAt ? sr.createdAt.toISOString().split('T')[0] : 'N/A',
+                        description: sr.title || 'Property Maintenance',
+                        propertyName: sr.propertyName || 'Property',
+                        unitNumber: sr.unitNumber ? (sr.unitNumber.toString().trim().toLowerCase().startsWith('unit') ? sr.unitNumber.toString().trim() : `Unit ${sr.unitNumber.toString().trim()}`) : '',
+                        category: 'Property Maintenance & Repairs',
+                        type: 'Expense',
+                        amount: cost,
+                    });
+                }
+            });
+            workOrders.forEach((wo) => {
+                const cost = Number(wo.actualCost || wo.cost || wo.estimatedCost || 0);
+                if (cost > 0) {
+                    totalMaintenance += cost;
+                    transactions.push({
+                        id: wo.id,
+                        date: wo.createdAt ? wo.createdAt.toISOString().split('T')[0] : 'N/A',
+                        description: wo.title || 'Work Order Repair',
+                        propertyName: wo.property?.name || 'Property',
+                        unitNumber: wo.unitNumber || '',
+                        category: 'Property Maintenance & Repairs',
+                        type: 'Expense',
+                        amount: cost,
+                    });
+                }
+            });
             if (totalMaintenance > 0) {
                 expensesMap['Property Maintenance & Repairs'] = totalMaintenance;
             }
-            else if (grossRentalIncome > 0) {
-                expensesMap['Property Maintenance & Repairs'] = Math.round(grossRentalIncome * 0.05);
-            }
         }
+        // Sort transactions date descending
+        transactions.sort((a, b) => {
+            const dateA = a.date && a.date !== 'N/A' ? new Date(a.date).getTime() : 0;
+            const dateB = b.date && b.date !== 'N/A' ? new Date(b.date).getTime() : 0;
+            return dateB - dateA;
+        });
         const income = Object.keys(incomeMap).map((k) => ({ name: k, amount: incomeMap[k] }));
         const expenses = Object.keys(expensesMap).map((k) => ({ name: k, amount: expensesMap[k] }));
         const totalIncome = income.reduce((acc, curr) => acc + curr.amount, 0);
@@ -380,11 +478,24 @@ class ReportService {
             data: {
                 income,
                 expenses,
+                transactions,
                 summary: {
                     totalIncome,
                     totalExpenses,
                     netProfit,
                 },
+            },
+            transactions,
+            summary: {
+                totalIncome,
+                totalExpenses,
+                netProfit,
+            },
+            pagination: {
+                page: 1,
+                limit: transactions.length || 50,
+                totalRecords: transactions.length,
+                totalPages: 1,
             },
         };
     }
@@ -524,7 +635,9 @@ class ReportService {
         let totalCollectedAmount = 0;
         const methodCounts = {};
         data.forEach((p) => {
-            totalCollectedAmount += p.amount;
+            if (['Paid', 'Partially Paid', 'PartiallyPaid', 'Cleared'].includes(p.paymentStatus) || !p.paymentStatus) {
+                totalCollectedAmount += p.amount;
+            }
             const method = p.paymentMethod || 'ACH';
             methodCounts[method] = (methodCounts[method] || 0) + 1;
         });

@@ -15,7 +15,13 @@ class ReportRepository {
         }
         const whereClause = {
             propertyId: { in: activePropertyIds },
+            property: {
+                status: { notIn: ['Inactive', 'Deleted'] },
+            },
         };
+        if (params.companyId) {
+            whereClause.companyId = params.companyId;
+        }
         if (unitId) {
             whereClause.unitId = unitId;
         }
@@ -25,14 +31,23 @@ class ReportRepository {
         if (leaseStatus) {
             const ls = leaseStatus.toLowerCase();
             if (ls === 'occupied' || ls === 'active') {
-                whereClause.status = { in: ['Active', 'ACTIVE', 'Occupied', 'occupied'] };
+                whereClause.status = 'Active';
             }
-            else if (ls === 'vacant' || ls === 'expired' || ls === 'terminated' || ls === 'inactive') {
-                whereClause.status = { in: ['Expired', 'Terminated', 'Inactive', 'Vacant'] };
+            else if (ls === 'pending' || ls === 'pending_move_in') {
+                whereClause.status = 'Pending_Move_In';
             }
-            else {
+            else if (ls === 'ended' || ls === 'expired' || ls === 'terminated') {
+                whereClause.status = { in: ['Ended', 'Expired', 'Terminated'] };
+            }
+            else if (ls !== 'all' && ls !== 'all statuses' && ls !== 'all_statuses') {
                 whereClause.status = leaseStatus;
             }
+            else {
+                whereClause.status = 'Active';
+            }
+        }
+        else {
+            whereClause.status = 'Active';
         }
         if (search) {
             whereClause.AND = [
@@ -54,7 +69,7 @@ class ReportRepository {
             orderBy = { rentAmount: sortOrder };
         if (sortBy === 'depositAmount')
             orderBy = { depositAmount: sortOrder };
-        const [leases, totalRecords, allLeases, allUnits] = await Promise.all([
+        const [leases, totalRecords] = await Promise.all([
             database_1.default.lease.findMany({
                 where: whereClause,
                 include: {
@@ -67,43 +82,54 @@ class ReportRepository {
                 take: limit,
             }),
             database_1.default.lease.count({ where: whereClause }),
-            database_1.default.lease.findMany({
-                where: whereClause,
-                include: { property: true, unit: true, tenant: true },
-            }),
-            database_1.default.unit.findMany({
-                where: {
-                    propertyId: { in: activePropertyIds },
-                    ...(unitId ? { id: unitId } : {}),
-                    ...(tenantId ? { tenants: { some: { id: tenantId } } } : {}),
-                },
-                include: { property: true, tenants: true },
-            }),
         ]);
+        const targetPropertyIds = propertyId ? [propertyId] : activePropertyIds;
+        const allActiveLeases = await database_1.default.lease.findMany({
+            where: {
+                propertyId: { in: targetPropertyIds },
+                property: {
+                    status: { notIn: ['Inactive', 'Deleted'] },
+                },
+                ...(params.companyId ? { companyId: params.companyId } : {}),
+                status: 'Active',
+            },
+            select: {
+                rentAmount: true,
+                depositAmount: true,
+                unit: {
+                    select: {
+                        rentAmount: true,
+                        securityDeposit: true,
+                    },
+                },
+            },
+        });
+        const allUnits = await database_1.default.unit.findMany({
+            where: {
+                propertyId: { in: targetPropertyIds },
+                property: {
+                    status: { notIn: ['Inactive', 'Deleted'] },
+                },
+                ...(unitId ? { id: unitId } : {}),
+                ...(tenantId ? { tenants: { some: { id: tenantId } } } : {}),
+            },
+            select: {
+                id: true,
+                status: true,
+            },
+        });
         let totalMonthlyRent = 0;
         let totalSecurityDeposits = 0;
-        let occupiedCount = 0;
-        if (allLeases.length > 0) {
-            allLeases.forEach((l) => {
-                totalMonthlyRent += Number(l.rentAmount || l.unit?.rentAmount || 0);
-                totalSecurityDeposits += Number(l.depositAmount || l.unit?.securityDeposit || 0);
-                if (l.status === 'Active' || l.unit?.status === 'Occupied')
-                    occupiedCount++;
-            });
-        }
-        else if (allUnits.length > 0) {
-            allUnits.forEach((u) => {
-                totalMonthlyRent += Number(u.rentAmount || 0);
-                totalSecurityDeposits += Number(u.securityDeposit || 0);
-                if (u.status === 'Occupied')
-                    occupiedCount++;
-            });
-        }
-        const totalUnitsCount = Math.max(allLeases.length, allUnits.length);
-        const vacantCount = Math.max(0, totalUnitsCount - occupiedCount);
+        allActiveLeases.forEach((l) => {
+            totalMonthlyRent += Number(l.rentAmount || l.unit?.rentAmount || 0);
+            totalSecurityDeposits += Number(l.depositAmount || l.unit?.securityDeposit || 0);
+        });
+        const totalUnitsCount = allUnits.length > 0 ? allUnits.length : leases.length;
+        const occupiedCount = allUnits.filter((u) => u.status === 'Occupied').length;
+        const vacantCount = allUnits.filter((u) => u.status === 'Vacant').length;
         return {
             leases,
-            units: allLeases.length === 0 ? allUnits : [],
+            units: leases.length === 0 ? allUnits : [],
             totalRecords: totalRecords || allUnits.length,
             summary: {
                 totalMonthlyRent,
@@ -123,9 +149,10 @@ class ReportRepository {
         }
         const whereClause = {
             id: { in: activePropertyIds },
+            status: { notIn: ['Inactive', 'Deleted'] },
         };
         const skip = (page - 1) * limit;
-        const [properties, totalRecords, allUnits, activeLeases] = await Promise.all([
+        const [properties, totalRecords, allUnits] = await Promise.all([
             database_1.default.property.findMany({
                 where: whereClause,
                 include: {
@@ -146,6 +173,9 @@ class ReportRepository {
             database_1.default.unit.findMany({
                 where: {
                     propertyId: { in: activePropertyIds },
+                    property: {
+                        status: { notIn: ['Inactive', 'Deleted'] },
+                    },
                 },
                 select: {
                     id: true,
@@ -153,29 +183,22 @@ class ReportRepository {
                     propertyId: true,
                 },
             }),
-            database_1.default.lease.findMany({
-                where: {
-                    propertyId: { in: activePropertyIds },
-                    status: 'Active',
-                },
-                select: {
-                    unitId: true,
-                },
-            }),
         ]);
-        const activeLeaseUnitSet = new Set(activeLeases.map((l) => l.unitId).filter(Boolean));
         let portfolioTotalUnits = allUnits.length;
         let portfolioOccupiedUnits = 0;
         let portfolioMaintenanceUnits = 0;
+        let portfolioVacantUnits = 0;
         allUnits.forEach((u) => {
-            if (u.status === 'Occupied' || activeLeaseUnitSet.has(u.id)) {
+            if (u.status === 'Occupied') {
                 portfolioOccupiedUnits++;
             }
             else if (u.status === 'UnderMaintenance') {
                 portfolioMaintenanceUnits++;
             }
+            else {
+                portfolioVacantUnits++;
+            }
         });
-        const portfolioVacantUnits = Math.max(0, portfolioTotalUnits - portfolioOccupiedUnits);
         const overallOccupancyPercentage = portfolioTotalUnits > 0
             ? parseFloat(((portfolioOccupiedUnits / portfolioTotalUnits) * 100).toFixed(1))
             : 0.0;
@@ -201,11 +224,12 @@ class ReportRepository {
         }
         const whereClause = {
             propertyId: { in: activePropertyIds },
+            ...(params.companyId ? { companyId: params.companyId } : {}),
         };
         if (tenantId) {
             whereClause.tenantId = tenantId;
         }
-        if (status) {
+        if (status && status !== 'All Statuses' && status !== 'all') {
             whereClause.status = status;
         }
         else {
@@ -214,9 +238,9 @@ class ReportRepository {
         if (startDate || endDate) {
             whereClause.dueDate = {};
             if (startDate)
-                whereClause.dueDate.gte = startDate;
+                whereClause.dueDate.gte = startDate instanceof Date ? startDate.toISOString().split('T')[0] : String(startDate).split('T')[0];
             if (endDate)
-                whereClause.dueDate.lte = endDate;
+                whereClause.dueDate.lte = endDate instanceof Date ? endDate.toISOString().split('T')[0] : String(endDate).split('T')[0];
         }
         const skip = (page - 1) * limit;
         let orderBy = { dueDate: sortOrder };
@@ -224,7 +248,7 @@ class ReportRepository {
             orderBy = { balance: sortOrder };
         if (sortBy === 'amount')
             orderBy = { amount: sortOrder };
-        const [invoices, totalRecords, allDelinquentInvoices] = await Promise.all([
+        const [invoices, totalRecords] = await Promise.all([
             database_1.default.invoice.findMany({
                 where: whereClause,
                 include: {
@@ -235,11 +259,18 @@ class ReportRepository {
                 take: limit,
             }),
             database_1.default.invoice.count({ where: whereClause }),
-            database_1.default.invoice.findMany({
-                where: whereClause,
-                include: { tenant: true },
-            }),
         ]);
+        const allDelinquentInvoices = await database_1.default.invoice.findMany({
+            where: whereClause,
+            select: {
+                balance: true,
+                amount: true,
+                paidAmount: true,
+                tenantId: true,
+                tenantName: true,
+                dueDate: true,
+            },
+        });
         let totalDelinquentBalance = 0;
         let totalOriginalAmount = 0;
         let totalDaysLateSum = 0;
@@ -281,7 +312,7 @@ class ReportRepository {
             return [];
         }
         const whereClause = {
-            propertyId: { in: activePropertyIds },
+            ...(params.companyId ? { journalEntry: { companyId: params.companyId } } : {}),
         };
         if (startDate || endDate) {
             whereClause.journalEntry = whereClause.journalEntry || {};
@@ -315,19 +346,20 @@ class ReportRepository {
         }
         const woWhere = {
             propertyId: { in: activePropertyIds },
+            property: {
+                status: { notIn: ['Inactive', 'Deleted'] },
+            },
+            ...(params.companyId ? { companyId: params.companyId } : {}),
         };
         const srWhere = {
-            OR: [
-                { propertyId: { in: activePropertyIds } },
-                ...(params.companyId ? [{ companyId: params.companyId }] : []),
-            ],
+            propertyId: { in: activePropertyIds },
+            ...(params.companyId ? { companyId: params.companyId } : {}),
         };
         if (propertyId) {
             woWhere.propertyId = propertyId;
             srWhere.propertyId = propertyId;
-            delete srWhere.OR;
         }
-        if (status) {
+        if (status && status !== 'All Statuses' && status !== 'all') {
             const sf = status.toLowerCase().replace(/[\s_-]/g, '');
             let statusFilter;
             if (sf === 'inprogress' || sf === 'inprocess') {
@@ -345,7 +377,7 @@ class ReportRepository {
             woWhere.status = statusFilter;
             srWhere.status = statusFilter;
         }
-        if (priority) {
+        if (priority && priority !== 'All Priorities' && priority !== 'all') {
             woWhere.priority = priority;
             srWhere.priority = { in: [priority, priority.toLowerCase(), priority.toUpperCase()] };
         }
@@ -466,7 +498,13 @@ class ReportRepository {
         }
         const whereClause = {
             propertyId: { in: activePropertyIds },
+            property: {
+                status: { notIn: ['Inactive', 'Deleted'] },
+            },
         };
+        if (params.companyId) {
+            whereClause.companyId = params.companyId;
+        }
         if (tenantId) {
             whereClause.tenantId = tenantId;
         }
@@ -507,8 +545,10 @@ class ReportRepository {
         let totalCollectedAmount = 0;
         const methodMap = {};
         allPayments.forEach((p) => {
-            const amt = Number(p.amount || 0);
-            totalCollectedAmount += amt;
+            if (['Paid', 'PartiallyPaid', 'Cleared'].includes(p.status) || !p.status) {
+                const amt = Number(p.amount || 0);
+                totalCollectedAmount += amt;
+            }
             const m = p.paymentMethod || 'ACH';
             methodMap[m] = (methodMap[m] || 0) + 1;
         });

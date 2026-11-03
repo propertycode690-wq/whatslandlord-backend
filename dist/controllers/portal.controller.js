@@ -2362,10 +2362,33 @@ class PortalController {
     // --- Expenses ---
     async getExpenses(req, res, next) {
         try {
+            const companyId = req.user?.companyId;
+            const activeProps = await database_1.default.property.findMany({
+                where: {
+                    ...(companyId ? { companyId } : {}),
+                    status: { notIn: ['Inactive', 'Deleted'] },
+                },
+                select: { id: true },
+            });
+            const activePropertyIds = new Set(activeProps.map((p) => p.id));
             const expenses = await database_1.default.expense.findMany({
                 orderBy: { date: 'desc' },
             });
-            return (0, apiResponse_1.sendSuccess)({ res, data: expenses });
+            const filtered = expenses.filter((e) => {
+                let parsed = {};
+                try {
+                    parsed = JSON.parse(e.description || '{}');
+                }
+                catch { }
+                if (parsed.companyId && companyId && parsed.companyId !== companyId) {
+                    return false;
+                }
+                if (parsed.propertyId) {
+                    return activePropertyIds.has(parsed.propertyId);
+                }
+                return Boolean(parsed.companyId && parsed.companyId === companyId);
+            });
+            return (0, apiResponse_1.sendSuccess)({ res, data: filtered });
         }
         catch (error) {
             next(error);
@@ -2383,6 +2406,9 @@ class PortalController {
             catch (e) {
                 parsedDesc = {};
             }
+            if (companyId && !parsedDesc.companyId) {
+                parsedDesc.companyId = companyId;
+            }
             const payeeType = parsedDesc.payeeType || req.body.payeeType || 'Vendor';
             const payeeId = parsedDesc.payeeId || req.body.payeeId || '';
             const propertyId = parsedDesc.propertyId || req.body.propertyId || null;
@@ -2394,7 +2420,7 @@ class PortalController {
                         category,
                         amount: parsedAmount,
                         date: new Date(date || Date.now()),
-                        description: description || '',
+                        description: JSON.stringify(parsedDesc),
                     },
                 });
                 // 1. Debit (Increase) Expense account: e.g. "5010" or first Account of type "Expense"
@@ -2621,10 +2647,33 @@ class PortalController {
     // --- Income ---
     async getIncome(req, res, next) {
         try {
+            const companyId = req.user?.companyId;
+            const activeProps = await database_1.default.property.findMany({
+                where: {
+                    ...(companyId ? { companyId } : {}),
+                    status: { notIn: ['Inactive', 'Deleted'] },
+                },
+                select: { id: true },
+            });
+            const activePropertyIds = new Set(activeProps.map((p) => p.id));
             const incomes = await database_1.default.income.findMany({
                 orderBy: { date: 'desc' },
             });
-            return (0, apiResponse_1.sendSuccess)({ res, data: incomes });
+            const filtered = incomes.filter((i) => {
+                let parsed = {};
+                try {
+                    parsed = JSON.parse(i.description || '{}');
+                }
+                catch { }
+                if (parsed.companyId && companyId && parsed.companyId !== companyId) {
+                    return false;
+                }
+                if (parsed.propertyId) {
+                    return activePropertyIds.has(parsed.propertyId);
+                }
+                return Boolean(parsed.companyId && parsed.companyId === companyId);
+            });
+            return (0, apiResponse_1.sendSuccess)({ res, data: filtered });
         }
         catch (error) {
             next(error);
@@ -2633,12 +2682,23 @@ class PortalController {
     async createIncome(req, res, next) {
         try {
             const { category, amount, date, description, status } = req.body;
+            const companyId = req.user?.companyId;
+            let descObj = {};
+            try {
+                descObj = JSON.parse(description || '{}');
+            }
+            catch {
+                descObj = { text: description };
+            }
+            if (companyId && !descObj.companyId) {
+                descObj.companyId = companyId;
+            }
             const income = await database_1.default.income.create({
                 data: {
                     category,
                     amount: parseFloat(amount || '0'),
                     date: new Date(date || Date.now()),
-                    description: description || '',
+                    description: JSON.stringify(descObj),
                     status: status || 'Cleared',
                 },
             });
