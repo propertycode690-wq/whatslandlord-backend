@@ -14,6 +14,7 @@ const paymentMethodEnum = zod_1.z.enum([
     'MoneyOrder',
     'Zelle',
     'Offline',
+    'Offline_Partial',
     'Offline (Partial)',
 ]);
 exports.createPaymentSchema = zod_1.z.object({
@@ -26,6 +27,7 @@ exports.createPaymentSchema = zod_1.z.object({
         unitId: zod_1.z.string().uuid('Invalid unit ID format').optional().nullable(),
         leaseId: zod_1.z.string().uuid('Invalid lease ID format').optional().nullable(),
         paymentMethod: paymentMethodEnum.default('ACH'),
+        status: zod_1.z.string().optional(),
         dueDate: (0, validationHelpers_1.safeDateSchema)().optional(),
         paidDate: (0, validationHelpers_1.safeDateSchema)().optional(),
     }),
