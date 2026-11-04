@@ -5,6 +5,7 @@ generator client {
 datasource db {
   provider = "mysql"
   url      = env("DATABASE_URL")
+  relationMode = "prisma"
 }
 
 model User {
@@ -207,6 +208,10 @@ model Tenant {
   monthlyIncome     Float?
   employmentStatus  String?
   currentAddress    String?
+  preferredName     String?
+  altPhone          String?
+  moveInDate        String?
+  invoiceStartDate  String?
   charges           Charge[]
   deposits          Deposit[]
   insurancePolicies InsurancePolicy[]
@@ -1348,9 +1353,9 @@ model RestoreBin {
   title      String   @db.VarChar(255)
   subtitle   String?  @db.VarChar(255)
   data       String   @db.LongText
-  deletedBy       String?  @db.VarChar(191)
-  deletedByEmail  String?  @db.VarChar(191)
-  deletedByUserId String?  @db.VarChar(191)
+  deletedBy        String?  @db.VarChar(191)
+  deletedByEmail   String?  @db.VarChar(191)
+  deletedByUserId  String?  @db.VarChar(191)
   companyId  String?  @db.VarChar(191)
   createdAt  DateTime @default(now())
   deletedAt  DateTime @default(now())

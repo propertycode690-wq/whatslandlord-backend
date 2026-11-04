@@ -75,9 +75,33 @@ class DashboardController {
             });
             const paymentsPendingSum = unpaidPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
             const pendingRent = invoicePendingSum > 0 ? invoicePendingSum : paymentsPendingSum;
-            // Sum of all recorded actual expenses from database (Expense does not have companyId)
-            const dbExpenses = await database_1.default.expense.findMany({});
-            const totalExpenses = dbExpenses.reduce((sum, e) => sum + (e.amount || 0), 0);
+            // Sum of all recorded actual expenses for this company from database
+            const activePropsForExpenses = await database_1.default.property.findMany({
+                where: {
+                    ...(companyId ? { companyId } : {}),
+                    status: { notIn: ['Inactive', 'Deleted'] },
+                },
+                select: { id: true },
+            });
+            const activePropertyIds = new Set(activePropsForExpenses.map((p) => p.id));
+            const allDbExpenses = await database_1.default.expense.findMany({});
+            const companyExpenses = companyId
+                ? allDbExpenses.filter((e) => {
+                    let parsed = {};
+                    try {
+                        parsed = JSON.parse(e.description || '{}');
+                    }
+                    catch { }
+                    if (parsed.companyId && parsed.companyId !== companyId) {
+                        return false;
+                    }
+                    if (parsed.propertyId) {
+                        return activePropertyIds.has(parsed.propertyId);
+                    }
+                    return Boolean(parsed.companyId && parsed.companyId === companyId);
+                })
+                : allDbExpenses;
+            const totalExpenses = companyExpenses.reduce((sum, e) => sum + (e.amount || 0), 0);
             // Open maintenance orders (both WorkOrders and ServiceRequests)
             const openWorkOrders = await database_1.default.workOrder.count({
                 where: {
@@ -139,7 +163,31 @@ class DashboardController {
                     ...(companyId ? { companyId } : {}),
                 },
             });
-            const expenses = await database_1.default.expense.findMany({});
+            const activePropsForExpenses = await database_1.default.property.findMany({
+                where: {
+                    ...(companyId ? { companyId } : {}),
+                    status: { notIn: ['Inactive', 'Deleted'] },
+                },
+                select: { id: true },
+            });
+            const activePropertyIds = new Set(activePropsForExpenses.map((p) => p.id));
+            const allDbExpenses = await database_1.default.expense.findMany({});
+            const expenses = companyId
+                ? allDbExpenses.filter((e) => {
+                    let parsed = {};
+                    try {
+                        parsed = JSON.parse(e.description || '{}');
+                    }
+                    catch { }
+                    if (parsed.companyId && parsed.companyId !== companyId) {
+                        return false;
+                    }
+                    if (parsed.propertyId) {
+                        return activePropertyIds.has(parsed.propertyId);
+                    }
+                    return Boolean(parsed.companyId && parsed.companyId === companyId);
+                })
+                : allDbExpenses;
             // Get last 6 months labels
             const months = [];
             const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];

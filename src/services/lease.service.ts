@@ -52,6 +52,24 @@ export class LeaseService {
       const moveInStatus = (leaseStatus === 'Active' || data.moveInStatus === 'COMPLETED') ? 'COMPLETED' : 'SCHEDULED';
       const completedDate = moveInStatus === 'COMPLETED' ? new Date() : null;
 
+      // Safeguard: If new lease is Active, auto-end any previous active leases on this unit to avoid duplicates
+      if (leaseStatus === 'Active' && data.unitId) {
+        await tx.lease.updateMany({
+          where: {
+            unitId: data.unitId,
+            status: 'Active',
+          },
+          data: {
+            status: 'Ended',
+          },
+        });
+
+        await tx.unit.update({
+          where: { id: data.unitId },
+          data: { status: 'Occupied' },
+        }).catch(() => {});
+      }
+
       const lease = await tx.lease.create({
         data: {
           tenantId: data.tenantId,
