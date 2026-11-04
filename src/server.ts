@@ -13,7 +13,7 @@ import { generateAutoInvoices, generateAutoLateFees } from './services/billingAu
 async function bootstrapDb() {
   try {
     logger.info('⚙️ Bootstrapping database schema with new columns...');
-    
+
     const ownerCols = [
       'ALTER TABLE owner_documents ADD COLUMN ownerId VARCHAR(191) NULL;',
       'ALTER TABLE owner_documents ADD COLUMN propertyId VARCHAR(191) NULL;',
@@ -38,6 +38,20 @@ async function bootstrapDb() {
     ];
 
     for (const sql of tenantCols) {
+      await prisma.$executeRawUnsafe(sql).catch((e: any) => {
+        if (!e.message.includes('1060') && !e.message.includes('Duplicate column')) {
+          logger.warn(`DDL execution warning: ${e.message}`);
+        }
+      });
+    }
+
+    const tenantTableCols = [
+      'ALTER TABLE tenants ADD COLUMN gender VARCHAR(191) NULL;',
+      'ALTER TABLE tenants ADD COLUMN previousBalance DOUBLE NULL DEFAULT 0;',
+      'ALTER TABLE tenants ADD COLUMN openingBalance DOUBLE NULL DEFAULT 0;'
+    ];
+
+    for (const sql of tenantTableCols) {
       await prisma.$executeRawUnsafe(sql).catch((e: any) => {
         if (!e.message.includes('1060') && !e.message.includes('Duplicate column')) {
           logger.warn(`DDL execution warning: ${e.message}`);
@@ -136,26 +150,26 @@ async function bootstrapDb() {
           payoutMethod: 'Check',
           companyId: firstCompany?.id || null,
         },
-      }).catch(() => {});
+      }).catch(() => { });
       logger.info('✅ Restored owner rohit into database.');
     }
 
     // 🛡️ Auto-clean orphaned MoveOuts and Leases referencing deleted Units so queries never crash
     await prisma.$executeRawUnsafe(`
       DELETE FROM move_outs WHERE unitId IS NOT NULL AND unitId NOT IN (SELECT id FROM units);
-    `).catch(() => {});
+    `).catch(() => { });
     await prisma.$executeRawUnsafe(`
       DELETE FROM leases WHERE unitId IS NOT NULL AND unitId NOT IN (SELECT id FROM units);
-    `).catch(() => {});
+    `).catch(() => { });
     await prisma.$executeRawUnsafe(`
       DELETE FROM move_ins WHERE unitId IS NOT NULL AND unitId NOT IN (SELECT id FROM units);
-    `).catch(() => {});
+    `).catch(() => { });
     await prisma.$executeRawUnsafe(`
       DELETE FROM rent_payments WHERE leaseId IS NOT NULL AND leaseId NOT IN (SELECT id FROM leases);
-    `).catch(() => {});
+    `).catch(() => { });
     await prisma.$executeRawUnsafe(`
       DELETE FROM rent_payments WHERE unitId IS NOT NULL AND unitId NOT IN (SELECT id FROM units);
-    `).catch(() => {});
+    `).catch(() => { });
     logger.info('🛡️ Orphaned leases, move_outs, and rent_payments auto-cleaned successfully.');
 
     logger.info('✅ Database schema bootstrap completed.');

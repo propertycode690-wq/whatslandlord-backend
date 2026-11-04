@@ -212,6 +212,9 @@ model Tenant {
   altPhone          String?
   moveInDate        String?
   invoiceStartDate  String?
+  gender            String?
+  previousBalance   Float?            @default(0)
+  openingBalance    Float?            @default(0)
   charges           Charge[]
   deposits          Deposit[]
   insurancePolicies InsurancePolicy[]

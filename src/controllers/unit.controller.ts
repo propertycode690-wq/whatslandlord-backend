@@ -18,7 +18,12 @@ export class UnitController {
         include: {
           property: true,
           building: true,
-          tenants: true,
+          tenants: {
+            include: {
+              invoices: true,
+              payments: true,
+            },
+          },
           leases: {
             where: { status: { in: ['Active', 'Pending_Move_In'] } },
             orderBy: { startDate: 'desc' },
@@ -43,7 +48,12 @@ export class UnitController {
         include: {
           property: true,
           building: true,
-          tenants: true,
+          tenants: {
+            include: {
+              invoices: true,
+              payments: true,
+            },
+          },
           leases: {
             where: { status: { in: ['Active', 'Pending_Move_In'] } },
             orderBy: { startDate: 'desc' },

@@ -17,6 +17,8 @@ export const createTenantSchema = z.object({
     moveInDate: z.string().optional().nullable(),
     invoiceStartDate: z.string().optional().nullable(),
     gender: z.string().optional().nullable(),
+    previousBalance: z.union([z.number(), z.string()]).optional().nullable(),
+    openingBalance: z.union([z.number(), z.string()]).optional().nullable(),
   }),
 });
 
@@ -48,5 +50,7 @@ export const updateTenantSchema = z.object({
     preferredName: z.string().optional().nullable(),
     altPhone: z.string().optional().nullable(),
     gender: z.string().optional().nullable(),
+    previousBalance: z.union([z.number(), z.string()]).optional().nullable(),
+    openingBalance: z.union([z.number(), z.string()]).optional().nullable(),
   }),
 });

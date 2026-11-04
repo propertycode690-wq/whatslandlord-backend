@@ -56,6 +56,9 @@ export class TenantController {
         altPhone,
         moveInDate,
         invoiceStartDate,
+        gender,
+        previousBalance,
+        openingBalance,
       } = req.body;
       const companyId = await getManagerCompanyId(req, req.body.companyId || req.user?.companyId);
       const file = req.file;
@@ -106,6 +109,9 @@ export class TenantController {
               altPhone: altPhone || (existingTenant as any).altPhone,
               moveInDate: moveInDate || (existingTenant as any).moveInDate,
               invoiceStartDate: invoiceStartDate || (existingTenant as any).invoiceStartDate,
+              gender: gender || (existingTenant as any).gender,
+              previousBalance: previousBalance !== undefined ? (previousBalance ? Number(previousBalance) : 0) : (existingTenant as any).previousBalance,
+              openingBalance: openingBalance !== undefined ? (openingBalance ? Number(openingBalance) : 0) : (existingTenant as any).openingBalance,
             },
           });
           return sendSuccess({ res, statusCode: 200, data: updatedTenant });
@@ -159,6 +165,9 @@ export class TenantController {
           altPhone: altPhone || null,
           moveInDate: moveInDate || null,
           invoiceStartDate: invoiceStartDate || null,
+          gender: gender || null,
+          previousBalance: previousBalance !== undefined && previousBalance !== '' ? Number(previousBalance) : 0,
+          openingBalance: openingBalance !== undefined && openingBalance !== '' ? Number(openingBalance) : (previousBalance !== undefined && previousBalance !== '' ? Number(previousBalance) : 0),
         },
       });
 
@@ -235,6 +244,9 @@ export class TenantController {
         altPhone,
         moveInDate,
         invoiceStartDate,
+        gender,
+        previousBalance,
+        openingBalance,
       } = req.body;
       const companyId = req.user?.companyId;
       const id = req.params.id as string;
@@ -298,6 +310,9 @@ export class TenantController {
           altPhone: altPhone !== undefined ? altPhone : undefined,
           moveInDate: moveInDate !== undefined ? moveInDate : undefined,
           invoiceStartDate: invoiceStartDate !== undefined ? invoiceStartDate : undefined,
+          gender: gender !== undefined ? gender : undefined,
+          previousBalance: previousBalance !== undefined && previousBalance !== '' ? Number(previousBalance) : undefined,
+          openingBalance: openingBalance !== undefined && openingBalance !== '' ? Number(openingBalance) : undefined,
         },
       });
 
