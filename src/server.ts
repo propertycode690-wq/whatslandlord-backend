@@ -1,4 +1,8 @@
 import app from './app';
+import http from 'http';
+import { Server } from 'socket.io';
+import { verifyAccessToken } from './utils/jwt.js';
+import { chatService } from './services/chat.service.js';
 import { env } from './config/env';
 import { logger } from './config/logger';
 import prisma from './config/database';
@@ -59,6 +63,42 @@ async function bootstrapDb() {
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `).catch((e: any) => {
       logger.warn(`restore_bin table init warning: ${e.message}`);
+    });
+
+    // Ensure conversations and chat_messages tables exist
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS conversations (
+        id VARCHAR(191) NOT NULL PRIMARY KEY,
+        companyId VARCHAR(191) NOT NULL,
+        participantType VARCHAR(191) NOT NULL,
+        tenantId VARCHAR(191) NULL,
+        ownerId VARCHAR(191) NULL,
+        staffId VARCHAR(191) NULL,
+        lastMessageAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+        status VARCHAR(191) NOT NULL DEFAULT 'ACTIVE',
+        createdAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+        updatedAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `).catch((e: any) => {
+      logger.warn(`conversations table init warning: ${e.message}`);
+    });
+
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS chat_messages (
+        id VARCHAR(191) NOT NULL PRIMARY KEY,
+        companyId VARCHAR(191) NOT NULL,
+        conversationId VARCHAR(191) NOT NULL,
+        senderRole VARCHAR(191) NOT NULL,
+        senderId VARCHAR(191) NOT NULL,
+        recipientRole VARCHAR(191) NOT NULL,
+        recipientId VARCHAR(191) NOT NULL,
+        body TEXT NOT NULL,
+        status VARCHAR(191) NOT NULL DEFAULT 'SENT',
+        createdAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+        readAt DATETIME(3) NULL
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `).catch((e: any) => {
+      logger.warn(`chat_messages table init warning: ${e.message}`);
     });
 
     // Clean up unwanted seeded mock Chart of Accounts from database
@@ -157,7 +197,84 @@ prisma.$connect()
     logger.error(error, '❌ Failed to connect to the MySQL database:');
   });
 
-const server = app.listen(env.PORT, () => {
+const httpServer = http.createServer(app);
+
+export const io = new Server(httpServer, {
+  cors: {
+    origin: '*',
+    methods: ['GET', 'POST'],
+    credentials: true,
+  },
+});
+
+app.set('io', io);
+
+io.use((socket, next) => {
+  const token = socket.handshake.auth?.token || socket.handshake.headers?.authorization?.replace('Bearer ', '');
+  if (!token) {
+    return next(new Error('Authentication token missing'));
+  }
+  try {
+    const payload = verifyAccessToken(token);
+    socket.data.user = payload;
+    next();
+  } catch (err: any) {
+    next(new Error('Invalid token'));
+  }
+});
+
+io.on('connection', (socket) => {
+  const user = socket.data.user;
+  if (!user) return;
+
+  const companyRoom = user.companyId ? `company:${user.companyId}` : null;
+  const userRoom = user.userId ? `user:${user.userId}` : null;
+
+  if (companyRoom) socket.join(companyRoom);
+  if (userRoom) socket.join(userRoom);
+
+  socket.on('join:conversation', (conversationId: string) => {
+    socket.join(`conversation:${conversationId}`);
+  });
+
+  socket.on('leave:conversation', (conversationId: string) => {
+    socket.leave(`conversation:${conversationId}`);
+  });
+
+  socket.on('message:send', async (data: { conversationId: string; body: string }) => {
+    try {
+      const savedMsg = await chatService.sendMessage(data.conversationId, data.body, user);
+      io.to(`conversation:${data.conversationId}`).emit('message:new', savedMsg);
+      if (companyRoom) {
+        io.to(companyRoom).emit('conversation:updated', {
+          conversationId: data.conversationId,
+          lastMessage: savedMsg.body,
+          lastMessageAt: savedMsg.createdAt,
+          senderId: savedMsg.senderId,
+        });
+      }
+      socket.emit('message:status', {
+        messageId: savedMsg.id,
+        status: 'DELIVERED',
+      });
+    } catch (err: any) {
+      socket.emit('message:error', { error: err.message });
+    }
+  });
+
+  socket.on('message:read', async (data: { conversationId: string }) => {
+    try {
+      await chatService.markAsRead(data.conversationId, user);
+      io.to(`conversation:${data.conversationId}`).emit('message:read_receipt', {
+        conversationId: data.conversationId,
+      });
+    } catch (err: any) {
+      // ignore
+    }
+  });
+});
+
+const server = httpServer.listen(env.PORT, () => {
   logger.info(`🚀 WhatsLandlord ERP Backend Server running on http://localhost:${env.PORT}${env.API_PREFIX}`);
   logger.info(`Environment: ${env.NODE_ENV}`);
 });

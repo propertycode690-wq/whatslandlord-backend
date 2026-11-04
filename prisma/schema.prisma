@@ -85,6 +85,7 @@ model Owner {
   distributions        OwnerDistribution[]
   company              Company?            @relation(fields: [companyId], references: [id])
   properties           Property[]
+  conversations        Conversation[]
 
   @@index([companyId], map: "owners_companyId_fkey")
   @@map("owners")
@@ -219,6 +220,7 @@ model Tenant {
   paymentPlans      PaymentPlan[]
   payments          RentPayment[]
   screeningReports  ScreeningReport[]
+  conversations     Conversation[]
   company           Company?          @relation(fields: [companyId], references: [id])
   unit              Unit?             @relation(fields: [unitId], references: [id])
 
@@ -730,6 +732,8 @@ model Company {
   ownerDocuments      OwnerDocument[]
   tenantDocuments     TenantDocument[]
   integrations        CompanyIntegration[]
+  conversations       Conversation[]
+  chatMessages        ChatMessage[]
 
   @@map("companies")
 }
@@ -870,6 +874,7 @@ model StaffProfile {
   createdAt          DateTime @default(now())
   companyId          String?
   company            Company? @relation(fields: [companyId], references: [id])
+  conversations      Conversation[]
 
   @@index([companyId], map: "staff_profiles_companyId_fkey")
   @@map("staff_profiles")
@@ -1361,3 +1366,50 @@ model RestoreBin {
 }
 
 
+
+
+model Conversation {
+  id              String        @id @default(uuid())
+  companyId       String
+  participantType String
+  tenantId        String?
+  ownerId         String?
+  staffId         String?
+  lastMessageAt   DateTime      @default(now())
+  status          String        @default("ACTIVE")
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  company         Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  tenant          Tenant?       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  owner           Owner?        @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  staff           StaffProfile? @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  messages        ChatMessage[]
+
+  @@unique([companyId, participantType, tenantId])
+  @@unique([companyId, participantType, ownerId])
+  @@unique([companyId, participantType, staffId])
+  @@index([companyId])
+  @@map("conversations")
+}
+
+model ChatMessage {
+  id              String       @id @default(uuid())
+  companyId       String
+  conversationId  String
+  senderRole      String
+  senderId        String
+  recipientRole   String
+  recipientId     String
+  body            String       @db.Text
+  status          String       @default("SENT")
+  createdAt       DateTime     @default(now())
+  readAt          DateTime?
+
+  conversation    Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  company         Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId])
+  @@index([companyId])
+  @@map("chat_messages")
+}
