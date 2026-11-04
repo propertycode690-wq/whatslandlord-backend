@@ -8,135 +8,144 @@ const database_1 = __importDefault(require("../../config/database"));
 class ReportRepository {
     // 1. Rent Roll Report Data
     async getRentRollData(params) {
-        const { propertyIds, propertyId, unitId, tenantId, leaseStatus, search, page, limit, sortBy, sortOrder = 'desc' } = params;
+        const { propertyIds, propertyId, unitId, tenantId, leaseStatus, search, page, limit, sortBy, sortOrder = 'asc' } = params;
         const activePropertyIds = propertyId ? [propertyId] : propertyIds;
         if (activePropertyIds.length === 0) {
-            return { leases: [], units: [], totalRecords: 0, summary: { totalMonthlyRent: 0, totalSecurityDeposits: 0, occupiedCount: 0, vacantCount: 0, totalUnits: 0 } };
+            return { units: [], totalRecords: 0, summary: { totalMonthlyRent: 0, totalSecurityDeposits: 0, occupiedCount: 0, vacantCount: 0, totalUnits: 0 } };
         }
+        const targetPropertyIds = propertyId ? [propertyId] : activePropertyIds;
+        // 1. Calculate portfolio-wide summary across all properties in scope
+        const portfolioUnits = await database_1.default.unit.findMany({
+            where: {
+                propertyId: { in: targetPropertyIds },
+                property: {
+                    status: { notIn: ['Inactive', 'Deleted'] },
+                    ...(params.companyId ? { companyId: params.companyId } : {}),
+                },
+            },
+            include: {
+                leases: {
+                    where: { status: 'Active' },
+                    orderBy: { startDate: 'desc' },
+                    take: 1,
+                },
+            },
+        });
+        let totalMonthlyRent = 0;
+        let totalSecurityDeposits = 0;
+        let occupiedCount = 0;
+        let vacantCount = 0;
+        portfolioUnits.forEach((u) => {
+            const activeLease = u.leases && u.leases.length > 0 ? u.leases[0] : null;
+            const isOccupied = Boolean(activeLease) || u.status === 'Occupied';
+            if (isOccupied) {
+                occupiedCount++;
+            }
+            else {
+                vacantCount++;
+            }
+            const rent = activeLease ? Number(activeLease.rentAmount || u.rentAmount || 0) : Number(u.rentAmount || 0);
+            const deposit = activeLease ? Number(activeLease.depositAmount || u.securityDeposit || 0) : Number(u.securityDeposit || 0);
+            totalMonthlyRent += rent;
+            totalSecurityDeposits += deposit;
+        });
+        // 2. Build whereClause for filtered list of units
         const whereClause = {
             propertyId: { in: activePropertyIds },
             property: {
                 status: { notIn: ['Inactive', 'Deleted'] },
+                ...(params.companyId ? { companyId: params.companyId } : {}),
             },
         };
-        if (params.companyId) {
-            whereClause.companyId = params.companyId;
-        }
         if (unitId) {
-            whereClause.unitId = unitId;
+            whereClause.id = unitId;
         }
         if (tenantId) {
-            whereClause.tenantId = tenantId;
-        }
-        if (leaseStatus) {
-            const ls = leaseStatus.toLowerCase();
-            if (ls === 'occupied' || ls === 'active') {
-                whereClause.status = 'Active';
-            }
-            else if (ls === 'pending' || ls === 'pending_move_in') {
-                whereClause.status = 'Pending_Move_In';
-            }
-            else if (ls === 'ended' || ls === 'expired' || ls === 'terminated') {
-                whereClause.status = { in: ['Ended', 'Expired', 'Terminated'] };
-            }
-            else if (ls !== 'all' && ls !== 'all statuses' && ls !== 'all_statuses') {
-                whereClause.status = leaseStatus;
-            }
-            else {
-                whereClause.status = 'Active';
-            }
-        }
-        else {
-            whereClause.status = 'Active';
-        }
-        if (search) {
-            whereClause.AND = [
-                {
-                    OR: [
-                        { tenant: { firstName: { contains: search } } },
-                        { tenant: { lastName: { contains: search } } },
-                        { property: { name: { contains: search } } },
-                        { unit: { unitNumber: { contains: search } } },
-                    ],
-                },
+            whereClause.OR = [
+                { tenants: { some: { id: tenantId } } },
+                { leases: { some: { tenantId } } },
             ];
         }
+        if (leaseStatus) {
+            const ls = leaseStatus.toLowerCase().trim();
+            if (ls === 'active' || ls === 'occupied') {
+                whereClause.OR = [
+                    { leases: { some: { status: 'Active' } } },
+                    { status: 'Occupied' },
+                ];
+            }
+            else if (ls === 'vacant') {
+                whereClause.AND = [
+                    { leases: { none: { status: 'Active' } } },
+                    { status: { not: 'Occupied' } },
+                ];
+            }
+            else if (ls === 'pending' || ls === 'pending_move_in') {
+                whereClause.leases = { some: { status: 'Pending_Move_In' } };
+            }
+            else if (ls === 'ended' || ls === 'expired' || ls === 'terminated') {
+                whereClause.leases = { some: { status: { in: ['Ended', 'Expired', 'Terminated'] } } };
+            }
+            else if (ls !== 'all' && ls !== 'all statuses' && ls !== 'all_statuses') {
+                whereClause.OR = [
+                    { leases: { some: { status: leaseStatus } } },
+                    { status: leaseStatus },
+                ];
+            }
+        }
+        if (search) {
+            const searchConditions = [
+                { unitNumber: { contains: search } },
+                { property: { name: { contains: search } } },
+                { tenants: { some: { OR: [{ firstName: { contains: search } }, { lastName: { contains: search } }] } } },
+                { leases: { some: { tenant: { OR: [{ firstName: { contains: search } }, { lastName: { contains: search } }] } } } },
+            ];
+            if (whereClause.AND) {
+                whereClause.AND.push({ OR: searchConditions });
+            }
+            else {
+                whereClause.AND = [{ OR: searchConditions }];
+            }
+        }
         const skip = (page - 1) * limit;
-        let orderBy = { startDate: sortOrder };
-        if (sortBy === 'endDate')
-            orderBy = { endDate: sortOrder };
+        let orderBy = [
+            { property: { name: 'asc' } },
+            { unitNumber: 'asc' },
+        ];
         if (sortBy === 'rentAmount')
             orderBy = { rentAmount: sortOrder };
-        if (sortBy === 'depositAmount')
-            orderBy = { depositAmount: sortOrder };
-        const [leases, totalRecords] = await Promise.all([
-            database_1.default.lease.findMany({
+        if (sortBy === 'securityDeposit')
+            orderBy = { securityDeposit: sortOrder };
+        if (sortBy === 'unitNumber')
+            orderBy = { unitNumber: sortOrder };
+        const [units, totalRecords] = await Promise.all([
+            database_1.default.unit.findMany({
                 where: whereClause,
                 include: {
                     property: true,
-                    unit: true,
-                    tenant: true,
+                    tenants: true,
+                    leases: {
+                        where: { status: 'Active' },
+                        include: { tenant: true },
+                        orderBy: { startDate: 'desc' },
+                        take: 1,
+                    },
                 },
                 orderBy,
                 skip,
                 take: limit,
             }),
-            database_1.default.lease.count({ where: whereClause }),
+            database_1.default.unit.count({ where: whereClause }),
         ]);
-        const targetPropertyIds = propertyId ? [propertyId] : activePropertyIds;
-        const allActiveLeases = await database_1.default.lease.findMany({
-            where: {
-                propertyId: { in: targetPropertyIds },
-                property: {
-                    status: { notIn: ['Inactive', 'Deleted'] },
-                },
-                ...(params.companyId ? { companyId: params.companyId } : {}),
-                status: 'Active',
-            },
-            select: {
-                rentAmount: true,
-                depositAmount: true,
-                unit: {
-                    select: {
-                        rentAmount: true,
-                        securityDeposit: true,
-                    },
-                },
-            },
-        });
-        const allUnits = await database_1.default.unit.findMany({
-            where: {
-                propertyId: { in: targetPropertyIds },
-                property: {
-                    status: { notIn: ['Inactive', 'Deleted'] },
-                },
-                ...(unitId ? { id: unitId } : {}),
-                ...(tenantId ? { tenants: { some: { id: tenantId } } } : {}),
-            },
-            select: {
-                id: true,
-                status: true,
-            },
-        });
-        let totalMonthlyRent = 0;
-        let totalSecurityDeposits = 0;
-        allActiveLeases.forEach((l) => {
-            totalMonthlyRent += Number(l.rentAmount || l.unit?.rentAmount || 0);
-            totalSecurityDeposits += Number(l.depositAmount || l.unit?.securityDeposit || 0);
-        });
-        const totalUnitsCount = allUnits.length > 0 ? allUnits.length : leases.length;
-        const occupiedCount = allUnits.filter((u) => u.status === 'Occupied').length;
-        const vacantCount = allUnits.filter((u) => u.status === 'Vacant').length;
         return {
-            leases,
-            units: leases.length === 0 ? allUnits : [],
-            totalRecords: totalRecords || allUnits.length,
+            units,
+            totalRecords,
             summary: {
                 totalMonthlyRent,
                 totalSecurityDeposits,
                 occupiedCount,
                 vacantCount,
-                totalUnits: totalUnitsCount,
+                totalUnits: portfolioUnits.length,
             },
         };
     }

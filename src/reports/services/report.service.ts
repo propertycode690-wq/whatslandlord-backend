@@ -117,55 +117,49 @@ export class ReportService {
       sortOrder: query.sortOrder,
     });
 
-    let leases = result.leases;
-    let unitsFallback: any[] = [];
-    if (leases.length === 0) {
-      unitsFallback = await prisma.unit.findMany({
-        where: {
-          propertyId: { in: query.propertyId ? [query.propertyId] : allowedProperties },
-          ...(query.unitId ? { id: query.unitId } : {}),
-          ...(query.tenantId ? { tenants: { some: { id: query.tenantId } } } : {}),
-        },
-        include: { property: true, tenants: true },
-      });
-    }
+    const units = result.units || [];
+    const data = units.map((u: any) => {
+      const activeLease = u.leases && u.leases.length > 0 ? u.leases[0] : null;
+      const tenantObj = activeLease?.tenant || (u.tenants && u.tenants.length > 0 ? u.tenants[0] : null);
 
-    let data: any[] = [];
-    if (leases.length > 0) {
-      data = leases.map((l) => ({
-        id: l.id,
-        propertyId: l.propertyId,
-        unitId: l.unitId,
-        tenantId: l.tenantId,
-        propertyName: l.property?.name || 'Property',
-        unitNumber: l.unit?.unitNumber ? (l.unit.unitNumber.toString().trim().toLowerCase().startsWith('unit') ? l.unit.unitNumber.toString().trim() : `Unit ${l.unit.unitNumber.toString().trim()}`) : 'Unit 101',
-        tenantName: l.tenant ? `${l.tenant.firstName} ${l.tenant.lastName}` : 'Resident',
-        startDate: l.startDate ? new Date(l.startDate).toISOString().split('T')[0] : 'N/A',
-        endDate: l.endDate ? new Date(l.endDate).toISOString().split('T')[0] : 'N/A',
-        leaseStatus: l.status || 'Active',
-        monthlyRent: Number(l.rentAmount || l.unit?.rentAmount || 0),
-        securityDeposit: Number(l.depositAmount || l.unit?.securityDeposit || 0),
-        unitStatus: l.unit?.status || (l.status === 'Active' ? 'Occupied' : 'Vacant'),
-      }));
-    } else {
-      data = unitsFallback.map((u) => {
-        const tenantObj = u.tenants && u.tenants.length > 0 ? u.tenants[0] : null;
-        return {
-          tenantId: tenantObj ? tenantObj.id : null,
-          propertyId: u.propertyId,
-          unitId: u.id,
-          propertyName: u.property?.name || 'Property',
-          unitNumber: u.unitNumber ? (u.unitNumber.toString().trim().toLowerCase().startsWith('unit') ? u.unitNumber.toString().trim() : `Unit ${u.unitNumber.toString().trim()}`) : 'Unit 101',
-          tenantName: tenantObj ? `${tenantObj.firstName} ${tenantObj.lastName}` : (u.status === 'Occupied' ? 'Tenant Assigned' : 'Vacant'),
-          startDate: u.createdAt ? new Date(u.createdAt).toISOString().split('T')[0] : 'N/A',
-          endDate: 'N/A',
-          leaseStatus: u.status === 'Occupied' ? 'Active' : 'Vacant',
-          monthlyRent: Number(u.rentAmount || 0),
-          securityDeposit: Number(u.securityDeposit || 0),
-          unitStatus: u.status || 'Vacant',
-        };
-      });
-    }
+      const isOccupied = Boolean(activeLease) || u.status === 'Occupied';
+      const tenantName = tenantObj
+        ? `${tenantObj.firstName} ${tenantObj.lastName}`.trim()
+        : (isOccupied ? 'Tenant Assigned' : 'Vacant');
+
+      const leaseStatus = activeLease ? (activeLease.status || 'Active') : (isOccupied ? 'Active' : 'Vacant');
+      const unitStatus = isOccupied ? 'Occupied' : (u.status || 'Vacant');
+
+      const monthlyRent = Number(activeLease ? (activeLease.rentAmount ?? u.rentAmount ?? 0) : (u.rentAmount ?? 0));
+      const securityDeposit = Number(activeLease ? (activeLease.depositAmount ?? u.securityDeposit ?? 0) : (u.securityDeposit ?? 0));
+
+      const startDate = activeLease?.startDate
+        ? new Date(activeLease.startDate).toISOString().split('T')[0]
+        : 'N/A';
+      const endDate = activeLease?.endDate
+        ? new Date(activeLease.endDate).toISOString().split('T')[0]
+        : 'N/A';
+
+      const rawUnitNum = u.unitNumber ? u.unitNumber.toString().trim() : '101';
+      const unitNumber = rawUnitNum.toLowerCase().startsWith('unit') ? rawUnitNum : `Unit ${rawUnitNum}`;
+
+      return {
+        id: activeLease?.id || u.id,
+        leaseId: activeLease?.id || null,
+        propertyId: u.propertyId,
+        unitId: u.id,
+        tenantId: tenantObj?.id || null,
+        propertyName: u.property?.name || 'Property',
+        unitNumber,
+        tenantName,
+        startDate,
+        endDate,
+        leaseStatus,
+        monthlyRent,
+        securityDeposit,
+        unitStatus,
+      };
+    });
 
     const totalMonthlyRent = result.summary?.totalMonthlyRent ?? data.reduce((sum, item) => sum + item.monthlyRent, 0);
     const totalSecurityDeposits = result.summary?.totalSecurityDeposits ?? data.reduce((sum, item) => sum + item.securityDeposit, 0);
