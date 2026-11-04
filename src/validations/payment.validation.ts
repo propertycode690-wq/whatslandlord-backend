@@ -12,6 +12,7 @@ const paymentMethodEnum = z.enum([
   'MoneyOrder',
   'Zelle',
   'Offline',
+  'Offline_Partial',
   'Offline (Partial)',
 ]);
 
@@ -25,6 +26,7 @@ export const createPaymentSchema = z.object({
     unitId: z.string().uuid('Invalid unit ID format').optional().nullable(),
     leaseId: z.string().uuid('Invalid lease ID format').optional().nullable(),
     paymentMethod: paymentMethodEnum.default('ACH'),
+    status: z.string().optional(),
     dueDate: safeDateSchema().optional(),
     paidDate: safeDateSchema().optional(),
   }),

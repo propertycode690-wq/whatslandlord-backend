@@ -446,6 +446,19 @@ export class PaymentService {
 
       const createdByValue = data.createdBy || (data.userRole === 'Tenant' ? 'Tenant Portal' : 'Manager');
 
+      // Sanitize paymentMethod and status into strictly valid Prisma enums
+      let normalizedMethod = data.paymentMethod || 'ACH';
+      if (normalizedMethod === 'Offline (Partial)' || normalizedMethod === 'Offline_Partial') {
+        normalizedMethod = 'Offline_Partial';
+      } else if (normalizedMethod === 'Offline') {
+        normalizedMethod = 'Offline';
+      }
+
+      let normalizedStatus: 'Paid' | 'PartiallyPaid' = 'Paid';
+      if (data.status === 'Partially Paid' || data.status === 'PartiallyPaid' || normalizedMethod === 'Offline_Partial') {
+        normalizedStatus = 'PartiallyPaid';
+      }
+
       const payment = await tx.rentPayment.create({
         data: {
           tenantId: tenantId,
@@ -455,8 +468,8 @@ export class PaymentService {
           amount: Number(data.amount),
           dueDate: new Date(data.dueDate || Date.now()),
           paidDate: new Date(data.paidDate || Date.now()),
-          status: 'Paid',
-          paymentMethod: data.paymentMethod || 'ACH',
+          status: normalizedStatus,
+          paymentMethod: normalizedMethod as any,
           referenceNumber: refNum,
           createdBy: createdByValue,
           companyId: data.companyId || tenant?.companyId || property?.companyId,
