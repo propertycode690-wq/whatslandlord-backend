@@ -28,6 +28,7 @@ import integrationRoutes from './integration.routes';
 import companyRoutes from './company.routes';
 import restoreBinRoutes from './restoreBin.routes';
 import aiGuideRoutes from './aiGuide.routes';
+import chatRoutes from './chat.routes';
 import { authMiddleware } from '../middlewares/auth.middleware';
 import { superAdminController } from '../controllers/superadmin.controller';
 
@@ -87,6 +88,7 @@ router.use('/reports', authMiddleware, reportRoutes);
 router.use('/integrations', authMiddleware, integrationRoutes);
 router.use('/restore-bin', authMiddleware, restoreBinRoutes);
 router.use('/ai-guide', aiGuideRoutes);
+router.use('/chat', chatRoutes);
 router.use('/', authMiddleware, secondaryRoutes);
 
 export default router;
