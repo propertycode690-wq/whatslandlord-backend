@@ -35,11 +35,17 @@ export async function generateAutoInvoices() {
     for (const lease of activeLeases) {
       if (!lease.tenantId || !lease.startDate) continue;
 
-      const start = parseDateUTC(lease.startDate.toISOString());
+      const rawInvoiceStartStr = (lease.tenant as any)?.invoiceStartDate;
+      const parsedInvoiceStart = rawInvoiceStartStr ? parseDateUTC(rawInvoiceStartStr) : null;
+      const start = (parsedInvoiceStart && !isNaN(parsedInvoiceStart.getTime()))
+        ? parsedInvoiceStart
+        : parseDateUTC(lease.startDate.toISOString());
       if (!start || start > today) continue;
 
       const end = lease.endDate ? parseDateUTC(lease.endDate.toISOString()) : new Date(Date.UTC(2099, 11, 31));
       if (!end) continue;
+
+
 
       // Verify today is not past lease end date
       const limitDate = today < end ? today : end;
