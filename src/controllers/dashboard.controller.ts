@@ -80,9 +80,31 @@ export class DashboardController {
 
       const pendingRent = invoicePendingSum > 0 ? invoicePendingSum : paymentsPendingSum;
 
-      // Sum of all recorded actual expenses from database (Expense does not have companyId)
-      const dbExpenses = await prisma.expense.findMany({});
-      const totalExpenses = dbExpenses.reduce((sum: number, e: any) => sum + (e.amount || 0), 0);
+      // Sum of all recorded actual expenses for this company from database
+      const activePropsForExpenses = await prisma.property.findMany({
+        where: {
+          ...(companyId ? { companyId } : {}),
+          status: { notIn: ['Inactive', 'Deleted'] },
+        },
+        select: { id: true },
+      });
+      const activePropertyIds = new Set(activePropsForExpenses.map((p) => p.id));
+
+      const allDbExpenses = await prisma.expense.findMany({});
+      const companyExpenses = companyId
+        ? allDbExpenses.filter((e) => {
+            let parsed: any = {};
+            try { parsed = JSON.parse(e.description || '{}'); } catch {}
+            if (parsed.companyId && parsed.companyId !== companyId) {
+              return false;
+            }
+            if (parsed.propertyId) {
+              return activePropertyIds.has(parsed.propertyId);
+            }
+            return Boolean(parsed.companyId && parsed.companyId === companyId);
+          })
+        : allDbExpenses;
+      const totalExpenses = companyExpenses.reduce((sum: number, e: any) => sum + (e.amount || 0), 0);
 
       // Open maintenance orders (both WorkOrders and ServiceRequests)
       const openWorkOrders = await prisma.workOrder.count({
@@ -153,7 +175,29 @@ export class DashboardController {
         },
       });
 
-      const expenses = await prisma.expense.findMany({});
+      const activePropsForExpenses = await prisma.property.findMany({
+        where: {
+          ...(companyId ? { companyId } : {}),
+          status: { notIn: ['Inactive', 'Deleted'] },
+        },
+        select: { id: true },
+      });
+      const activePropertyIds = new Set(activePropsForExpenses.map((p) => p.id));
+
+      const allDbExpenses = await prisma.expense.findMany({});
+      const expenses = companyId
+        ? allDbExpenses.filter((e) => {
+            let parsed: any = {};
+            try { parsed = JSON.parse(e.description || '{}'); } catch {}
+            if (parsed.companyId && parsed.companyId !== companyId) {
+              return false;
+            }
+            if (parsed.propertyId) {
+              return activePropertyIds.has(parsed.propertyId);
+            }
+            return Boolean(parsed.companyId && parsed.companyId === companyId);
+          })
+        : allDbExpenses;
 
       // Get last 6 months labels
       const months = [];
