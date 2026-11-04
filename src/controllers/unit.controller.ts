@@ -19,6 +19,10 @@ export class UnitController {
           property: true,
           building: true,
           tenants: true,
+          leases: {
+            where: { status: { in: ['Active', 'Pending_Move_In'] } },
+            orderBy: { startDate: 'desc' },
+          },
         },
       });
       return sendSuccess({ res, data: units });
@@ -40,6 +44,10 @@ export class UnitController {
           property: true,
           building: true,
           tenants: true,
+          leases: {
+            where: { status: { in: ['Active', 'Pending_Move_In'] } },
+            orderBy: { startDate: 'desc' },
+          },
         },
       });
       return sendSuccess({ res, data: unit });

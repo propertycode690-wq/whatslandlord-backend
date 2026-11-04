@@ -11,6 +11,12 @@ export const createTenantSchema = z.object({
     unitId: z.string().uuid('Invalid Unit ID format').optional().nullable(),
     status: tenantStatusEnum.default('Pending'),
     password: z.string({ required_error: 'Password is required' }).min(6, 'Password must be at least 6 characters'),
+    dob: z.string().optional().nullable(),
+    preferredName: z.string().optional().nullable(),
+    altPhone: z.string().optional().nullable(),
+    moveInDate: z.string().optional().nullable(),
+    invoiceStartDate: z.string().optional().nullable(),
+    gender: z.string().optional().nullable(),
   }),
 });
 

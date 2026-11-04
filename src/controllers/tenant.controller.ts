@@ -52,6 +52,10 @@ export class TenantController {
         monthlyIncome,
         employmentStatus,
         currentAddress,
+        preferredName,
+        altPhone,
+        moveInDate,
+        invoiceStartDate,
       } = req.body;
       const companyId = await getManagerCompanyId(req, req.body.companyId || req.user?.companyId);
       const file = req.file;
@@ -78,7 +82,7 @@ export class TenantController {
         const normEmail = email.trim().toLowerCase();
         const existingTenant = await prisma.tenant.findFirst({ where: { email: normEmail } });
         if (existingTenant) {
-          const updatedTenant = await prisma.tenant.update({
+          const updatedTenant = await (prisma.tenant.update as any)({
             where: { id: existingTenant.id },
             data: {
               unitId: unitId || existingTenant.unitId,
@@ -98,6 +102,10 @@ export class TenantController {
               monthlyIncome: monthlyIncome ? Number(monthlyIncome) : existingTenant.monthlyIncome,
               employmentStatus: employmentStatus || existingTenant.employmentStatus,
               currentAddress: currentAddress || existingTenant.currentAddress,
+              preferredName: preferredName || (existingTenant as any).preferredName,
+              altPhone: altPhone || (existingTenant as any).altPhone,
+              moveInDate: moveInDate || (existingTenant as any).moveInDate,
+              invoiceStartDate: invoiceStartDate || (existingTenant as any).invoiceStartDate,
             },
           });
           return sendSuccess({ res, statusCode: 200, data: updatedTenant });
@@ -125,7 +133,7 @@ export class TenantController {
         }
       }
 
-      const tenant = await prisma.tenant.create({
+      const tenant = await (prisma.tenant.create as any)({
         data: {
           firstName,
           lastName,
@@ -147,6 +155,10 @@ export class TenantController {
           monthlyIncome: monthlyIncome ? Number(monthlyIncome) : null,
           employmentStatus: employmentStatus || null,
           currentAddress: currentAddress || null,
+          preferredName: preferredName || null,
+          altPhone: altPhone || null,
+          moveInDate: moveInDate || null,
+          invoiceStartDate: invoiceStartDate || null,
         },
       });
 
@@ -219,6 +231,10 @@ export class TenantController {
         monthlyIncome,
         employmentStatus,
         currentAddress,
+        preferredName,
+        altPhone,
+        moveInDate,
+        invoiceStartDate,
       } = req.body;
       const companyId = req.user?.companyId;
       const id = req.params.id as string;
@@ -256,7 +272,7 @@ export class TenantController {
         }
       }
 
-      const tenant = await prisma.tenant.update({
+      const tenant = await (prisma.tenant.update as any)({
         where: { id },
         data: {
           firstName,
@@ -278,6 +294,10 @@ export class TenantController {
           monthlyIncome: monthlyIncome !== undefined ? (monthlyIncome ? Number(monthlyIncome) : null) : undefined,
           employmentStatus: employmentStatus !== undefined ? employmentStatus : undefined,
           currentAddress: currentAddress !== undefined ? currentAddress : undefined,
+          preferredName: preferredName !== undefined ? preferredName : undefined,
+          altPhone: altPhone !== undefined ? altPhone : undefined,
+          moveInDate: moveInDate !== undefined ? moveInDate : undefined,
+          invoiceStartDate: invoiceStartDate !== undefined ? invoiceStartDate : undefined,
         },
       });
 
