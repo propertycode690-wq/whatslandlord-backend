@@ -881,19 +881,17 @@ export class UnitController {
               },
             });
 
-            // Recalculate occupancyRate on Property if Occupied
-            if (isOccupied) {
-              const updatedP = await tx.property.findUnique({
+            // Recalculate occupancyRate on Property for BOTH Vacant and Occupied units
+            const updatedP = await tx.property.findUnique({
+              where: { id: targetProp.id },
+              select: { unitsCount: true, occupiedUnits: true },
+            });
+            if (updatedP && updatedP.unitsCount > 0) {
+              const rate = Math.round(((updatedP.occupiedUnits || 0) / updatedP.unitsCount) * 100);
+              await tx.property.update({
                 where: { id: targetProp.id },
-                select: { unitsCount: true, occupiedUnits: true },
+                data: { occupancyRate: rate },
               });
-              if (updatedP && updatedP.unitsCount > 0) {
-                const rate = Math.round((updatedP.occupiedUnits / updatedP.unitsCount) * 100);
-                await tx.property.update({
-                  where: { id: targetProp.id },
-                  data: { occupancyRate: rate },
-                });
-              }
             }
 
             importedUnits.push(createdUnit);
@@ -905,12 +903,22 @@ export class UnitController {
         }
       );
 
+      const importedOcc = importedUnits.filter((u: any) => u.status === 'Occupied').length;
+      const importedVac = importedUnits.filter((u: any) => u.status === 'Vacant').length;
+      const totalProcessed = units.length;
+      const overallOccupancyRate = importedUnits.length > 0 ? Math.round((importedOcc / importedUnits.length) * 100) : 0;
+
       return sendSuccess({
         res,
         data: {
           count: importedUnits.length,
           units: importedUnits,
           skippedDuplicates,
+          totalProcessed,
+          importedOccupied: importedOcc,
+          importedVacant: importedVac,
+          occupancyRate: overallOccupancyRate,
+          skippedCount: skippedDuplicates.length,
         },
       });
     } catch (error) {

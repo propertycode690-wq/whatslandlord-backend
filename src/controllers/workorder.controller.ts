@@ -136,8 +136,8 @@ export class WorkOrderController {
             propertyName: sr.propertyName || 'Oakridge Heights',
             unitNumber: sr.unitNumber ? `Unit ${sr.unitNumber}` : 'Unit 102',
             vendorId: sr.assignedVendorId || '',
-            vendorName: sr.assignedVendorName || 'ProFix Solutions',
-            assignedTechnician: sr.assignedVendorName || sr.assignedTechnician || 'Technician Lead 1',
+            vendorName: sr.assignedVendorName || '',
+            assignedTechnician: sr.assignedVendorName || sr.assignedTechnician || '',
             scheduledDate: sr.scheduledDate || new Date().toISOString().split('T')[0],
             preferredTime: sr.scheduledDate || (sr.notes?.includes('Preferred Visit:') ? sr.notes.replace('Preferred Visit:', '').trim() : null) || (sr.description?.match(/\[Preferred Visit:\s*([^\]]+)\]/)?.[1]) || null,
             priority: sr.priority || 'Normal',
@@ -206,7 +206,7 @@ export class WorkOrderController {
   async update(req: AuthenticatedRequest, res: Response, next: NextFunction) {
     try {
       const id = req.params['id'] as string;
-      const { status, priority, estimatedCost, actualCost, extraCost, cost, vendorId, rejectReason, resolutionNotes } = req.body;
+      const { status, priority, estimatedCost, actualCost, extraCost, cost, vendorId, vendorName, rejectReason, resolutionNotes } = req.body;
       const companyId = req.user?.companyId;
 
       const statusMap: Record<string, string> = {
@@ -231,6 +231,12 @@ export class WorkOrderController {
       // 1. Check ServiceRequest table
       const existingSr = await prisma.serviceRequest.findUnique({ where: { id } });
       if (existingSr) {
+        let assignedVendorName = vendorName;
+        if (vendorId && !assignedVendorName) {
+          const v = await prisma.vendor.findUnique({ where: { id: vendorId } });
+          if (v) assignedVendorName = v.companyName || v.contactName;
+        }
+
         const srStatus = finalStatus === 'InProgress' ? 'In Progress' : finalStatus;
         const updatedSr = await prisma.serviceRequest.update({
           where: { id },
@@ -239,6 +245,8 @@ export class WorkOrderController {
             ...(resolvedActualCost !== undefined && { cost: resolvedActualCost }),
             ...(estimatedCost !== undefined && { estimatedCost: parseFloat(String(estimatedCost)) }),
             ...(rejectReason && { notes: rejectReason }),
+            ...(vendorId !== undefined && { assignedVendorId: vendorId || null }),
+            ...(assignedVendorName !== undefined && { assignedVendorName: assignedVendorName || null }),
           },
         });
 

@@ -113,21 +113,42 @@ export class VendorController {
 
   async update(req: AuthenticatedRequest, res: Response, next: NextFunction) {
     try {
-      const { companyName, contactName, email, phone, serviceType, rating } = req.body;
+      const companyName = req.body.companyName || req.body.name;
+      const contactName = req.body.contactName || req.body.primaryContact || req.body.contact;
+      const serviceType = req.body.serviceType || req.body.category;
+      const { email, phone, rating, status } = req.body;
       const id = req.params.id as string;
       const companyId = req.user?.companyId;
 
-      if (companyId) {
-        const check = await prisma.vendor.findFirst({
-          where: { id, companyId },
-        });
-        if (!check) throw new Error('Vendor not found.');
-      }
+      const check = await prisma.vendor.findFirst({
+        where: companyId ? { id, companyId } : { id },
+      });
+      if (!check) throw new AppError('Vendor not found.', 404);
 
       const vendor = await prisma.vendor.update({
         where: { id },
-        data: { companyName, contactName, email, phone, serviceType, rating },
+        data: {
+          ...(companyName ? { companyName } : {}),
+          ...(contactName ? { contactName } : {}),
+          ...(email ? { email: email.trim().toLowerCase() } : {}),
+          ...(phone !== undefined ? { phone } : {}),
+          ...(serviceType ? { serviceType } : {}),
+          ...(rating !== undefined ? { rating: Number(rating) } : {}),
+        },
       });
+
+      // Update matching user if email/contact changed
+      if (check.email) {
+        await prisma.user.updateMany({
+          where: { email: check.email, ...(companyId ? { companyId } : {}) },
+          data: {
+            ...(email ? { email: email.trim().toLowerCase() } : {}),
+            ...(phone !== undefined ? { phone } : {}),
+            ...(status ? { status } : {}),
+          },
+        }).catch(() => {});
+      }
+
       return sendSuccess({ res, data: vendor });
     } catch (error: any) {
       if (error?.code === 'P2002' || error?.message?.includes('Unique constraint')) {
