@@ -131,9 +131,9 @@ prisma.$connect()
     await bootstrapDb();
     await autoHealMissingCompanyIds();
 
-    // Start background auto-billing on server start (America/New_York)
-    generateAutoInvoices().catch(e => logger.error(e, 'Auto-invoices startup error'));
-    generateAutoLateFees().catch(e => logger.error(e, 'Auto-late-fees startup error'));
+    // Background auto-billing scheduled via daily cron (America/New_York)
+
+
 
     // Schedule daily cron job at 00:05 AM US Eastern Time (America/New_York)
     cron.schedule('5 0 * * *', () => {

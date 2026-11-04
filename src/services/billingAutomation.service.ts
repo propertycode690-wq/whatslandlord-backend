@@ -10,10 +10,18 @@ export function getNewYorkDate(): Date {
 // Helper function to parse YYYY-MM-DD string into midnight UTC Date
 export function parseDateUTC(dateStr: string): Date | null {
   if (!dateStr) return null;
-  const cleanStr = dateStr.split('T')[0];
+  const cleanStr = dateStr.split('T')[0].trim().replace(/\//g, '-');
   const parts = cleanStr.split('-').map(Number);
   if (parts.length !== 3 || parts.some(isNaN)) return null;
-  return new Date(Date.UTC(parts[0], parts[1] - 1, parts[2]));
+  let year = parts[0];
+  let month = parts[1];
+  let day = parts[2];
+  if (parts[2] > 1000) {
+    year = parts[2];
+    day = parts[0];
+    month = parts[1];
+  }
+  return new Date(Date.UTC(year, month - 1, day));
 }
 
 export async function generateAutoInvoices() {
@@ -188,6 +196,7 @@ export async function generateAutoLateFees() {
       // Ensure it is a rent-related invoice
       const lineItemsStr = String(inv.lineItems || '').toLowerCase();
       if (!lineItemsStr.includes('rent')) continue;
+      if (lineItemsStr.includes('late fee')) continue;
 
       const due = parseDateUTC(inv.dueDate);
       if (!due) continue;

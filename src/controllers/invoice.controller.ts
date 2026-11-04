@@ -2,16 +2,16 @@ import { Response, NextFunction } from 'express';
 import prisma from '../config/database';
 import { sendSuccess } from '../utils/apiResponse';
 import { AuthenticatedRequest } from '../middlewares/auth.middleware';
-import { generateAutoInvoices, generateAutoLateFees } from '../services/billingAutomation.service';
+
 import { env } from '../config/env';
 import { createNotification } from '../services/notification.helper';
 
 class InvoiceController {
   async getAll(req: AuthenticatedRequest, res: Response, next: NextFunction) {
     try {
-      // Auto-generate rent invoices & late fees (catch-up)
-      await generateAutoInvoices();
-      await generateAutoLateFees();
+
+
+
 
       const companyId = req.user?.companyId;
       const userRole = req.user?.roleName || (req.user as any)?.role;
