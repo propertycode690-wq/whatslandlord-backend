@@ -53,7 +53,7 @@ export class ReportRepository {
     const { propertyIds, propertyId, unitId, tenantId, leaseStatus, startDate, endDate, search, page, limit, sortBy, sortOrder = 'asc' } = params;
     const softDeleted = await this.getSoftDeletedIds(params.companyId);
 
-    const activePropertyIds = (propertyId ? [propertyId] : propertyIds).filter(
+    const activePropertyIds = (propertyId ? propertyIds.filter((id) => id === propertyId) : propertyIds).filter(
       (id) => !softDeleted.properties.includes(id)
     );
 
@@ -212,7 +212,12 @@ export class ReportRepository {
     if (sortBy === 'unitNumber') orderBy = { unitNumber: sortOrder };
 
     const leaseWhereFilter: any = {
+      ...(params.companyId ? { companyId: params.companyId } : {}),
       ...(softDeleted.leases.length > 0 ? { id: { notIn: softDeleted.leases } } : {}),
+    };
+
+    const tenantCompanyFilter: any = {
+      ...(params.companyId ? { companyId: params.companyId } : {}),
     };
 
     const [rawUnits, totalRecords, summaryUnits] = await Promise.all([
@@ -220,7 +225,9 @@ export class ReportRepository {
         where: whereClause,
         include: {
           property: true,
-          tenants: true,
+          tenants: {
+            where: tenantCompanyFilter,
+          },
           leases: {
             where: leaseWhereFilter,
             orderBy: { startDate: 'desc' },
@@ -233,7 +240,9 @@ export class ReportRepository {
         const fallbackUnits = await prisma.unit.findMany({
           where: whereClause,
           include: {
-            tenants: true,
+            tenants: {
+              where: tenantCompanyFilter,
+            },
             leases: {
               where: leaseWhereFilter,
               orderBy: { startDate: 'desc' },
@@ -255,7 +264,9 @@ export class ReportRepository {
       prisma.unit.findMany({
         where: whereClause,
         include: {
-          tenants: true,
+          tenants: {
+            where: tenantCompanyFilter,
+          },
           leases: {
             where: leaseWhereFilter,
             orderBy: { startDate: 'desc' },
@@ -277,6 +288,7 @@ export class ReportRepository {
       ? await prisma.tenant.findMany({
           where: {
             id: { in: allLeaseTenantIds },
+            ...(params.companyId ? { companyId: params.companyId } : {}),
             status: { notIn: ['Inactive'] as any },
           },
         })

@@ -9,43 +9,46 @@ export class ReportService {
     this.reportRepository = new ReportRepository();
   }
 
-  // Helper: Resolve Allowed Property IDs for a User (Strict Manager Isolation + Soft-Delete Exclusion)
+  // Helper: Resolve Allowed Property IDs for a User (Strict Manager Isolation + Soft-Delete Exclusion, NO Global Fallback)
   async resolveAllowedProperties(user: any, companyId?: string): Promise<string[]> {
     if (!user) {
       throw new AppError('Unauthorized access.', 401, 'UNAUTHORIZED');
     }
 
-    const userRole = (user.roleName || user.role || (user.role && user.role.name) || '').toString();
-    const softDeleted = await this.reportRepository.getSoftDeletedIds(companyId || user?.companyId);
+    const actualUserId = user.userId || user.id;
+    const targetCompanyId = companyId || user?.companyId;
+    const softDeleted = await this.reportRepository.getSoftDeletedIds(targetCompanyId);
     const excludeDeletedProps = softDeleted.properties;
 
     const filterActiveIds = (props: { id: string }[]) =>
       props.map((p) => p.id).filter((id) => !excludeDeletedProps.includes(id));
 
     // 1. Check explicit UserAssignments for the manager/user
-    const assignments = await prisma.userAssignment.findMany({
-      where: {
-        userId: user.id,
-      },
-      select: { propertyId: true },
-    });
-    const assignedIds = assignments
-      .map((a) => a.propertyId)
-      .filter((id): id is string => Boolean(id) && !excludeDeletedProps.includes(id as string));
-
-    if (assignedIds.length > 0) {
-      const activeProps = await prisma.property.findMany({
+    if (actualUserId) {
+      const assignments = await prisma.userAssignment.findMany({
         where: {
-          id: { in: assignedIds },
-          status: { notIn: ['Inactive', 'Deleted', 'Draft'] },
+          userId: actualUserId,
         },
-        select: { id: true },
+        select: { propertyId: true },
       });
-      return filterActiveIds(activeProps);
+      const assignedIds = assignments
+        .map((a) => a.propertyId)
+        .filter((id): id is string => Boolean(id) && !excludeDeletedProps.includes(id as string));
+
+      if (assignedIds.length > 0) {
+        const activeProps = await prisma.property.findMany({
+          where: {
+            id: { in: assignedIds },
+            ...(targetCompanyId ? { companyId: targetCompanyId } : {}),
+            status: { notIn: ['Inactive', 'Deleted', 'Draft'] },
+          },
+          select: { id: true },
+        });
+        return filterActiveIds(activeProps);
+      }
     }
 
-    // 2. Filter by Company ID if manager has a companyId
-    const targetCompanyId = companyId || user?.companyId;
+    // 2. Strict Company Isolation: If user belongs to a company, return ONLY that company's active properties (even if 0!)
     if (targetCompanyId) {
       const companyProperties = await prisma.property.findMany({
         where: {
@@ -54,44 +57,25 @@ export class ReportService {
         },
         select: { id: true },
       });
-      const filtered = filterActiveIds(companyProperties);
-      if (filtered.length > 0) {
-        return filtered;
-      }
+      return filterActiveIds(companyProperties);
     }
 
     // 3. Filter by Owner ID if user is a property owner
-    const ownerProperties = await prisma.property.findMany({
-      where: {
-        ownerId: user.id,
-        status: { notIn: ['Inactive', 'Deleted', 'Draft'] },
-      },
-      select: { id: true },
-    });
-    const filteredOwnerProps = filterActiveIds(ownerProperties);
-    if (filteredOwnerProps.length > 0) {
-      return filteredOwnerProps;
-    }
-
-    // 4. SuperAdmin or Admin role can view all properties
-    if (userRole === 'SuperAdmin' || userRole === 'Admin') {
-      const allProps = await prisma.property.findMany({
+    if (actualUserId) {
+      const ownerProperties = await prisma.property.findMany({
         where: {
+          ownerId: actualUserId,
           status: { notIn: ['Inactive', 'Deleted', 'Draft'] },
         },
         select: { id: true },
       });
-      return filterActiveIds(allProps);
+      if (ownerProperties.length > 0) {
+        return filterActiveIds(ownerProperties);
+      }
     }
 
-    // 5. Fallback for single-manager DB setups
-    const properties = await prisma.property.findMany({
-      where: {
-        status: { notIn: ['Inactive', 'Deleted', 'Draft'] },
-      },
-      select: { id: true },
-    });
-    return filterActiveIds(properties);
+    // 4. No fallback! If user has no company, no assignments, and owns no properties, return empty (0 data)
+    return [];
   }
 
   // 1. Rent Roll
@@ -99,7 +83,7 @@ export class ReportService {
     const companyId = user?.companyId;
     const allowedProperties = await this.resolveAllowedProperties(user, companyId);
 
-    if (allowedProperties.length === 0) {
+    if (!companyId || allowedProperties.length === 0) {
       return {
         data: [],
         summary: {
@@ -152,8 +136,8 @@ export class ReportService {
       const isOccupied = Boolean(activeLease) || (u.status === 'Occupied' && validTenants.length > 0);
 
       const tenantName = isOccupied && tenantObj
-        ? `${tenantObj.firstName || ''} ${tenantObj.lastName || ''}`.trim()
-        : (displayLease && tenantObj ? `${tenantObj.firstName || ''} ${tenantObj.lastName || ''}`.trim() : 'Vacant');
+        ? `${tenantObj.firstName || ''} ${tenantObj.lastName || ''}`.trim() || 'N/A'
+        : (displayLease && tenantObj ? `${tenantObj.firstName || ''} ${tenantObj.lastName || ''}`.trim() || 'N/A' : 'N/A');
 
       const leaseStatus = activeLease
         ? 'Active'
@@ -421,14 +405,38 @@ export class ReportService {
   // 4. Profit & Loss Report
   async getProfitLoss(user: any, query: any) {
     const companyId = user?.companyId;
-    let allowedProperties = await this.resolveAllowedProperties(user, companyId);
-    if (allowedProperties.length === 0) {
-      const allProps = await prisma.property.findMany({ select: { id: true } });
-      allowedProperties = allProps.map((p) => p.id);
+    const allowedProperties = await this.resolveAllowedProperties(user, companyId);
+    if (!companyId || allowedProperties.length === 0) {
+      return {
+        data: {
+          income: [],
+          expenses: [],
+          transactions: [],
+          summary: { totalIncome: 0, totalExpenses: 0, netProfit: 0 },
+        },
+        transactions: [],
+        summary: { totalIncome: 0, totalExpenses: 0, netProfit: 0 },
+        pagination: { page: 1, limit: 50, totalRecords: 0, totalPages: 0 },
+      };
     }
 
-    const targetPropIds = query.propertyId ? [query.propertyId] : allowedProperties;
-    const propertyFilter = targetPropIds.length > 0 ? { propertyId: { in: targetPropIds } } : {};
+    const targetPropIds = query.propertyId
+      ? allowedProperties.filter((id) => id === query.propertyId)
+      : allowedProperties;
+    if (targetPropIds.length === 0) {
+      return {
+        data: {
+          income: [],
+          expenses: [],
+          transactions: [],
+          summary: { totalIncome: 0, totalExpenses: 0, netProfit: 0 },
+        },
+        transactions: [],
+        summary: { totalIncome: 0, totalExpenses: 0, netProfit: 0 },
+        pagination: { page: 1, limit: 50, totalRecords: 0, totalPages: 0 },
+      };
+    }
+    const propertyFilter = { propertyId: { in: targetPropIds } };
 
     const startDate = query.startDate ? new Date(query.startDate) : undefined;
     const endDate = query.endDate ? new Date(query.endDate) : undefined;
