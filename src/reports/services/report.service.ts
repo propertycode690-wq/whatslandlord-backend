@@ -601,12 +601,14 @@ export class ReportService {
         propertyName: w.property?.name || w.propertyName || 'Property',
         unitNumber: w.unitNumber || 'Unit 101',
         issue: w.title,
-        priority: w.priority || 'Medium',
+        priority: w.priority === 'Normal' ? 'Medium' : (w.priority || 'Medium'),
         status: st,
         assignedPerson: w.vendor?.contactName || w.assignedTechnician || 'Unassigned',
         vendor: w.vendor?.companyName || w.vendorName || 'Unassigned',
         estimatedCost: est,
         actualCost: act,
+        createdAt: w.createdAt,
+        updatedAt: w.updatedAt,
         createdDate: w.createdAt ? new Date(w.createdAt).toISOString().split('T')[0] : 'N/A',
         completedDate: (st === 'Completed' || st === 'Closed') ? (w.updatedAt ? new Date(w.updatedAt).toISOString().split('T')[0] : 'N/A') : null,
       };
@@ -683,30 +685,70 @@ export class ReportService {
     }));
 
     if (data.length === 0) {
-      const paidInvoices = await prisma.invoice.findMany({
-        where: {
+      let shouldQueryInvoices = true;
+      if (query.paymentMethod && query.paymentMethod !== 'All Methods' && query.paymentMethod !== 'all') {
+        const pmClean = query.paymentMethod.toLowerCase().replace(/[\s_-]/g, '');
+        if (pmClean !== 'banktransfer') {
+          shouldQueryInvoices = false;
+        }
+      }
+
+      if (shouldQueryInvoices) {
+        const invStatusFilter: any = {};
+        if (query.status && query.status !== 'All Statuses' && query.status !== 'all') {
+          const stClean = query.status.toLowerCase().replace(/[\s_-]/g, '');
+          if (stClean === 'paid') {
+            invStatusFilter.in = ['Paid', 'PAID', 'paid'];
+          } else if (stClean === 'partiallypaid' || stClean === 'partially_paid') {
+            invStatusFilter.in = ['Partially Paid', 'PartiallyPaid', 'PARTIALLY_PAID'];
+          } else {
+            invStatusFilter.in = [query.status];
+          }
+        } else {
+          invStatusFilter.in = ['Paid', 'Partially Paid'];
+        }
+
+        const invoiceWhere: any = {
           companyId,
           propertyId: { in: query.propertyId ? [query.propertyId] : allowedProperties },
-          status: { in: ['Paid', 'Partially Paid'] },
-        },
-        include: { tenant: true },
-      });
+          status: invStatusFilter,
+        };
 
-      data = paidInvoices.map((inv, idx) => ({
-        invoiceId: inv.id,
-        tenantId: inv.tenantId,
-        propertyId: inv.propertyId,
-        unitId: inv.tenant?.unitId || (inv as any).unitId || '',
-        receiptNo: `#INV-${1001 + idx}`,
-        tenantName: inv.tenant ? `${inv.tenant.firstName} ${inv.tenant.lastName}` : (inv.tenantName || 'Resident'),
-        propertyName: inv.propertyName || 'Property',
-        unitNumber: inv.unitNumber || 'Unassigned',
-        paymentDate: inv.updatedAt ? new Date(inv.updatedAt).toISOString().split('T')[0] : 'N/A',
-        amount: Number(inv.paidAmount || inv.amount || 0),
-        paymentMethod: 'Bank Transfer',
-        referenceNumber: `#INV-REF-${inv.id.substring(0, 6)}`,
-        paymentStatus: 'Paid',
-      }));
+        if (query.startDate || query.endDate) {
+          invoiceWhere.updatedAt = {};
+          if (query.startDate) {
+            const s = new Date(query.startDate);
+            s.setHours(0, 0, 0, 0);
+            invoiceWhere.updatedAt.gte = s;
+          }
+          if (query.endDate) {
+            const e = new Date(query.endDate);
+            e.setHours(23, 59, 59, 999);
+            invoiceWhere.updatedAt.lte = e;
+          }
+        }
+
+        const paidInvoices = await prisma.invoice.findMany({
+          where: invoiceWhere,
+          include: { tenant: true },
+        });
+
+        data = paidInvoices.map((inv, idx) => ({
+          invoiceId: inv.id,
+          tenantId: inv.tenantId,
+          propertyId: inv.propertyId,
+          unitId: inv.tenant?.unitId || (inv as any).unitId || '',
+          receiptNo: `#INV-${1001 + idx}`,
+          tenantName: inv.tenant ? `${inv.tenant.firstName} ${inv.tenant.lastName}` : (inv.tenantName || 'Resident'),
+          propertyName: inv.propertyName || 'Property',
+          unitNumber: inv.unitNumber || 'Unassigned',
+          paymentDate: inv.updatedAt ? new Date(inv.updatedAt).toISOString().split('T')[0] : 'N/A',
+          amount: Number(inv.paidAmount || inv.amount || 0),
+          paymentMethod: 'Bank Transfer',
+          referenceNumber: `#INV-REF-${inv.id.substring(0, 6)}`,
+          paymentStatus: inv.status === 'Partially Paid' ? 'PartiallyPaid' : (inv.status || 'Paid'),
+        }));
+      }
     }
 
     let totalCollectedAmount = 0;

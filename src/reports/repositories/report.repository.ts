@@ -628,29 +628,86 @@ export class ReportRepository {
 
     if (status && status !== 'All Statuses' && status !== 'all') {
       const sf = status.toLowerCase().replace(/[\s_-]/g, '');
-      let statusFilter: any;
+      let woStatusFilter: any;
+      let srStatusFilter: any;
+
       if (sf === 'inprogress' || sf === 'inprocess') {
-        statusFilter = { in: ['InProgress', 'In Progress', 'in_progress', 'IN_PROGRESS', 'Assigned', 'assigned'] };
-      } else if (sf === 'completed' || sf === 'closed') {
-        statusFilter = { in: ['Completed', 'completed', 'Closed', 'closed'] };
+        woStatusFilter = 'InProgress';
+        srStatusFilter = { in: ['In Progress', 'InProgress', 'in_progress', 'IN_PROGRESS'] };
+      } else if (sf === 'assigned') {
+        woStatusFilter = 'Assigned';
+        srStatusFilter = { in: ['Assigned', 'assigned'] };
+      } else if (sf === 'completed') {
+        woStatusFilter = 'Completed';
+        srStatusFilter = { in: ['Completed', 'completed'] };
+      } else if (sf === 'closed') {
+        woStatusFilter = 'Closed';
+        srStatusFilter = { in: ['Closed', 'closed'] };
       } else if (sf === 'notstarted' || sf === 'open' || sf === 'new') {
-        statusFilter = { in: ['Not Started', 'not_started', 'Open', 'open', 'New', 'new', 'Pending'] };
-      } else {
-        statusFilter = { in: [status, status.toLowerCase(), status.toUpperCase()] };
+        woStatusFilter = 'Open';
+        srStatusFilter = { in: ['Open', 'open', 'New', 'new', 'Pending', 'Not Started'] };
+      } else if (sf === 'rejected') {
+        woStatusFilter = 'Rejected';
+        srStatusFilter = { in: ['Rejected', 'rejected'] };
+      } else if (sf === 'cancelled') {
+        woStatusFilter = 'Cancelled';
+        srStatusFilter = { in: ['Cancelled', 'cancelled'] };
       }
-      woWhere.status = statusFilter;
-      srWhere.status = statusFilter;
+
+      if (woStatusFilter) {
+        woWhere.status = woStatusFilter;
+      }
+      if (srStatusFilter) {
+        srWhere.status = srStatusFilter;
+      }
     }
 
     if (priority && priority !== 'All Priorities' && priority !== 'all') {
-      woWhere.priority = priority;
-      srWhere.priority = { in: [priority, priority.toLowerCase(), priority.toUpperCase()] };
+      const pClean = priority.trim();
+      const pLower = pClean.toLowerCase();
+
+      let woPriority: any = undefined;
+      let srPriorities: string[] = [];
+
+      if (pLower === 'low') {
+        woPriority = 'Low';
+        srPriorities = ['Low', 'low', 'LOW'];
+      } else if (pLower === 'medium' || pLower === 'normal') {
+        woPriority = 'Normal';
+        srPriorities = ['Medium', 'medium', 'MEDIUM', 'Normal', 'normal', 'NORMAL'];
+      } else if (pLower === 'high') {
+        woPriority = 'High';
+        srPriorities = ['High', 'high', 'HIGH'];
+      } else if (pLower.includes('urgent') || pLower.includes('emergency')) {
+        woPriority = 'Emergency';
+        srPriorities = [
+          'Urgent', 'urgent', 'URGENT',
+          'Emergency', 'emergency', 'EMERGENCY',
+          'Urgent / Emergency', 'urgent / emergency',
+          'Urgent/Emergency',
+        ];
+      }
+
+      if (woPriority) {
+        woWhere.priority = woPriority;
+      }
+      if (srPriorities.length > 0) {
+        srWhere.priority = { in: srPriorities };
+      }
     }
 
     if (startDate || endDate) {
       const dateFilter: any = {};
-      if (startDate) dateFilter.gte = startDate;
-      if (endDate) dateFilter.lte = endDate;
+      if (startDate) {
+        const s = new Date(startDate);
+        s.setHours(0, 0, 0, 0);
+        dateFilter.gte = s;
+      }
+      if (endDate) {
+        const e = new Date(endDate);
+        e.setHours(23, 59, 59, 999);
+        dateFilter.lte = e;
+      }
       woWhere.createdAt = dateFilter;
       srWhere.createdAt = dateFilter;
     }
@@ -677,7 +734,7 @@ export class ReportRepository {
         propertyName: w.property?.name || w.propertyName || 'Property',
         unitNumber: w.unitNumber || 'Unit 101',
         title: w.title,
-        priority: w.priority || 'Medium',
+        priority: w.priority === 'Normal' ? 'Medium' : (w.priority || 'Medium'),
         status: w.status || 'Open',
         assignedTechnician: w.assignedTechnician || w.vendor?.contactName || 'Unassigned',
         vendorName: w.vendor?.companyName || w.vendorName || 'Unassigned',
@@ -810,29 +867,81 @@ export class ReportRepository {
       whereClause.companyId = params.companyId;
     }
 
+    const andConditions: any[] = [];
+
     if (unitId) {
-      whereClause.OR = [
-        { unitId },
-        { tenant: { unitId } },
-      ];
+      andConditions.push({
+        OR: [
+          { unitId },
+          { tenant: { unitId } },
+        ],
+      });
     }
 
     if (tenantId) {
       whereClause.tenantId = tenantId;
     }
 
-    if (paymentMethod) {
-      whereClause.paymentMethod = { in: [paymentMethod, paymentMethod.toLowerCase(), paymentMethod.toUpperCase()] };
+    if (paymentMethod && paymentMethod !== 'All Methods' && paymentMethod !== 'all') {
+      const pmClean = paymentMethod.toLowerCase().replace(/[\s_-]/g, '');
+      const pmMap: Record<string, string> = {
+        ach: 'ACH',
+        creditcard: 'CreditCard',
+        debitcard: 'DebitCard',
+        banktransfer: 'BankTransfer',
+        wiretransfer: 'WireTransfer',
+        cash: 'Cash',
+        check: 'Check',
+        moneyorder: 'MoneyOrder',
+        zelle: 'Zelle',
+        offline: 'Offline',
+      };
+      const validPm = pmMap[pmClean];
+      if (validPm) {
+        whereClause.paymentMethod = validPm;
+      }
     }
 
-    if (status) {
-      whereClause.status = { in: [status, status.toLowerCase(), status.toUpperCase()] };
+    if (status && status !== 'All Statuses' && status !== 'all') {
+      const stClean = status.toLowerCase().replace(/[\s_-]/g, '');
+      const stMap: Record<string, string> = {
+        pending: 'Pending',
+        paid: 'Paid',
+        partiallypaid: 'PartiallyPaid',
+        partially_paid: 'PartiallyPaid',
+        partial: 'PartiallyPaid',
+        failed: 'Failed',
+        refunded: 'Refunded',
+        voided: 'Voided',
+      };
+      const validStatus = stMap[stClean];
+      if (validStatus) {
+        whereClause.status = validStatus;
+      }
     }
 
     if (startDate || endDate) {
-      whereClause.paidDate = {};
-      if (startDate) whereClause.paidDate.gte = startDate;
-      if (endDate) whereClause.paidDate.lte = endDate;
+      const dateCond: any = {};
+      if (startDate) {
+        const s = new Date(startDate);
+        s.setHours(0, 0, 0, 0);
+        dateCond.gte = s;
+      }
+      if (endDate) {
+        const e = new Date(endDate);
+        e.setHours(23, 59, 59, 999);
+        dateCond.lte = e;
+      }
+      andConditions.push({
+        OR: [
+          { paidDate: dateCond },
+          { dueDate: dateCond },
+        ],
+      });
+    }
+
+    if (andConditions.length > 0) {
+      whereClause.AND = andConditions;
     }
 
     const skip = (page - 1) * limit;

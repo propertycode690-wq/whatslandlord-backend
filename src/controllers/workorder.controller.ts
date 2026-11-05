@@ -171,7 +171,7 @@ export class WorkOrderController {
           title,
           description,
           vendorId: vendorId || null,
-          priority: priority || 'Normal',
+          priority: priority === 'Medium' ? 'Normal' : (priority === 'Urgent' || priority === 'Urgent / Emergency' ? 'Emergency' : (priority || 'Normal')),
           status: status || 'Open',
           estimatedCost: estimatedCost ? parseFloat(estimatedCost) : null,
           actualCost: actualCost ? parseFloat(actualCost) : null,
@@ -284,7 +284,7 @@ export class WorkOrderController {
           where: { id },
           data: {
             ...(finalStatus && { status: finalStatus as any }),
-            ...(priority && { priority }),
+            ...(priority && { priority: (priority === 'Medium' ? 'Normal' : (priority === 'Urgent' || priority === 'Urgent / Emergency' ? 'Emergency' : priority)) as any }),
             ...(estimatedCost !== undefined && { estimatedCost: parseFloat(String(estimatedCost)) }),
             ...(resolvedActualCost !== undefined && { actualCost: resolvedActualCost }),
             ...(vendorId && { vendorId }),
