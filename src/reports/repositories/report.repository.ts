@@ -313,7 +313,7 @@ export class ReportRepository {
           const pMonth = p.paidDate ? new Date(p.paidDate).toISOString().slice(0, 7) : '';
           const pTenantName = p.tenant ? `${p.tenant.firstName} ${p.tenant.lastName}` : (p.tenantName || '');
           const tMatch = (p.tenantId && inv.tenantId && p.tenantId === inv.tenantId) ||
-                         (pTenantName && inv.tenantName && pTenantName.trim().toLowerCase() === inv.tenantName.trim().toLowerCase());
+            (pTenantName && inv.tenantName && pTenantName.trim().toLowerCase() === inv.tenantName.trim().toLowerCase());
           return tMatch && pMonth === invMonth;
         });
 
