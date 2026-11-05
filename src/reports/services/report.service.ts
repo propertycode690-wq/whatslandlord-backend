@@ -500,56 +500,52 @@ export class ReportService {
     const propertyFilter = { propertyId: { in: targetPropIds } };
 
     const [payments, invoices, workOrders, serviceRequests] = await Promise.all([
-      prisma.rentPayment.findMany({
-        where: {
-          ...propertyFilter,
-          companyId,
-          status: { in: ['Paid', 'PartiallyPaid'] as any },
-          ...(softDeleted.payments.length > 0 ? { id: { notIn: softDeleted.payments } } : {}),
-          ...(softDeleted.tenants.length > 0
-            ? { OR: [{ tenantId: null }, { tenantId: { notIn: softDeleted.tenants } }] }
-            : {}),
-          ...(softDeleted.units.length > 0
-            ? { OR: [{ unitId: null }, { unitId: { notIn: softDeleted.units } }] }
-            : {}),
-          ...(softDeleted.leases.length > 0
-            ? { OR: [{ leaseId: null }, { leaseId: { notIn: softDeleted.leases } }] }
-            : {}),
-        },
-        include: { property: true, tenant: true, unit: true },
-      }),
-      prisma.invoice.findMany({
-        where: {
-          ...propertyFilter,
-          companyId,
-          status: { in: ['Paid', 'Partially Paid'] },
-          ...(softDeleted.invoices.length > 0 ? { id: { notIn: softDeleted.invoices } } : {}),
-          ...(softDeleted.tenants.length > 0
-            ? { OR: [{ tenantId: null }, { tenantId: { notIn: softDeleted.tenants } }] }
-            : {}),
-        },
-        include: { tenant: true },
-      }),
-      prisma.workOrder.findMany({
-        where: {
-          ...propertyFilter,
-          companyId,
-          status: { in: ['Completed', 'Closed'] as any },
-          ...(softDeleted.workOrders.length > 0 ? { id: { notIn: softDeleted.workOrders } } : {}),
-        },
-        include: { property: true, vendor: true },
-      }),
-      prisma.serviceRequest.findMany({
-        where: {
-          ...propertyFilter,
-          companyId,
-          status: { in: ['Completed', 'Closed', 'completed', 'closed'] },
-          ...(softDeleted.serviceRequests.length > 0
-            ? { id: { notIn: softDeleted.serviceRequests } }
-            : {}),
-        },
-      }),
+      prisma.rentPayment
+        .findMany({
+          where: {
+            ...propertyFilter,
+            companyId,
+            status: { in: ['Paid', 'PartiallyPaid'] as any },
+          },
+          include: { property: true, tenant: true, unit: true },
+        })
+        .catch(() => [] as any[]),
+      prisma.invoice
+        .findMany({
+          where: {
+            ...propertyFilter,
+            companyId,
+            status: { in: ['Paid', 'Partially Paid'] },
+          },
+        })
+        .catch(() => [] as any[]),
+      prisma.workOrder
+        .findMany({
+          where: {
+            ...propertyFilter,
+            companyId,
+            status: { in: ['Completed', 'Closed'] as any },
+          },
+          include: { property: true, vendor: true },
+        })
+        .catch(() => [] as any[]),
+      prisma.serviceRequest
+        .findMany({
+          where: {
+            ...propertyFilter,
+            companyId,
+            status: { in: ['Completed', 'Closed', 'completed', 'closed'] },
+          },
+        })
+        .catch(() => [] as any[]),
     ]);
+
+    const activeTenantByIdMap = new Map(activeTenants.map((t) => [t.id, t]));
+    const softDeletedPaymentsSet = new Set(softDeleted.payments);
+    const softDeletedInvoicesSet = new Set(softDeleted.invoices);
+    const softDeletedWorkOrdersSet = new Set(softDeleted.workOrders);
+    const softDeletedServiceReqsSet = new Set(softDeleted.serviceRequests);
+    const softDeletedLeasesSet = new Set(softDeleted.leases);
 
     const allTransactions: any[] = [];
 
@@ -562,7 +558,9 @@ export class ReportService {
     };
 
     // 1. Process Real Paid Rent Payments (Strictly active properties, active units, active tenants)
-    payments.forEach((p) => {
+    payments.forEach((p: any) => {
+      if (!p || softDeletedPaymentsSet.has(p.id)) return;
+      if (p.leaseId && softDeletedLeasesSet.has(p.leaseId)) return;
       // Skip tenant refund entries created in rent_payments
       if (p.referenceNumber && String(p.referenceNumber).toUpperCase().startsWith('REFUND-')) {
         return;
@@ -583,8 +581,9 @@ export class ReportService {
       const amt = Number(p.amount || 0);
       if (amt <= 0) return;
 
-      const tenantName = p.tenant
-        ? `${p.tenant.firstName || ''} ${p.tenant.lastName || ''}`.trim()
+      const tenantObj = p.tenant || (p.tenantId ? activeTenantByIdMap.get(p.tenantId) : null);
+      const tenantName = tenantObj
+        ? `${tenantObj.firstName || ''} ${tenantObj.lastName || ''}`.trim()
         : '';
       const tKey = getTenantDedupKey(p.tenantId, tenantName, p.propertyId);
       remainingPaymentCreditByTenant.set(tKey, (remainingPaymentCreditByTenant.get(tKey) || 0) + amt);
@@ -611,20 +610,19 @@ export class ReportService {
     });
 
     // 2. Process Paid Invoices ONLY for amounts not already accounted for by RentPayment records
-    invoices.forEach((inv) => {
-      if (inv.tenantId && !activeTenantIds.has(inv.tenantId)) {
+    invoices.forEach((inv: any) => {
+      if (!inv || softDeletedInvoicesSet.has(inv.id)) return;
+      if (inv.tenantId && inv.tenantId !== 'default' && !activeTenantIds.has(inv.tenantId)) {
         return;
       }
-      if (inv.tenant && (inv.tenant as any).status === 'Inactive') {
-        return;
-      }
+      const tenantObj = inv.tenantId ? activeTenantByIdMap.get(inv.tenantId) : null;
 
       const matchedUnit =
-        (inv.tenant?.unitId ? unitByIdMap.get(inv.tenant.unitId) : null) ||
+        (tenantObj?.unitId ? unitByIdMap.get(tenantObj.unitId) : null) ||
         resolveUnitFromPropAndNumber(inv.propertyId, inv.unitNumber);
 
       // If invoice specifies a unit or tenant unit that was deleted, skip
-      if (inv.tenant?.unitId && !activeUnitIds.has(inv.tenant.unitId)) {
+      if (tenantObj?.unitId && !activeUnitIds.has(tenantObj.unitId)) {
         return;
       }
       if (inv.unitNumber && !matchedUnit) {
@@ -647,7 +645,7 @@ export class ReportService {
 
       const tenantName =
         inv.tenantName ||
-        (inv.tenant ? `${inv.tenant.firstName || ''} ${inv.tenant.lastName || ''}`.trim() : '');
+        (tenantObj ? `${tenantObj.firstName || ''} ${tenantObj.lastName || ''}`.trim() : '');
       const tKey = getTenantDedupKey(inv.tenantId, tenantName, inv.propertyId);
       const availableCredit = remainingPaymentCreditByTenant.get(tKey) || 0;
 
@@ -667,7 +665,7 @@ export class ReportService {
           ? inv.dueDate.split('T')[0]
           : inv.dueDate
         : inv.createdAt
-          ? inv.createdAt.toISOString().split('T')[0]
+          ? new Date(inv.createdAt).toISOString().split('T')[0]
           : 'N/A';
 
       allTransactions.push({
@@ -675,7 +673,7 @@ export class ReportService {
         date: dateStr,
         description: `Rent payment - ${tenantName || 'Tenant'}`,
         propertyId: inv.propertyId,
-        unitId: matchedUnit?.id || inv.tenant?.unitId || '',
+        unitId: matchedUnit?.id || tenantObj?.unitId || '',
         tenantId: inv.tenantId || '',
         tenantName: tenantName || 'N/A',
         propertyName: propNameMap.get(inv.propertyId) || inv.propertyName || 'Property',
@@ -686,27 +684,24 @@ export class ReportService {
       });
     });
 
-    // 3. Process Completed / Closed Work Orders & Service Requests as Operating Expenses (no Open/Estimated/Deleted items)
-    const seenCompletedMaintenanceKeys = new Set<string>();
+    // 3. Process Completed / Closed Work Orders & Service Requests as Operating Expenses (no Open/InProgress/Estimated/Deleted items)
+    const seenExpenseIds = new Set<string>();
+    const softDeletedUnitsSet = new Set(softDeleted.units);
 
     workOrders.forEach((wo: any) => {
-      const st = String(wo.status || '').toLowerCase();
+      if (!wo || !wo.id || seenExpenseIds.has(wo.id) || softDeletedWorkOrdersSet.has(wo.id)) return;
+      const st = String(wo.status || '').toLowerCase().replace(/[\s_-]/g, '');
       if (st !== 'completed' && st !== 'closed') return;
 
-      const subCosts =
-        Number(wo.labourCost || 0) + Number(wo.materialsCost || 0) + Number(wo.extraExpenses || 0);
-      const cost =
-        Number(wo.actualCost || 0) > 0
-          ? Number(wo.actualCost)
-          : subCosts > 0
-            ? subCosts
-            : Number(wo.estimatedCost || 0);
+      const baseActual = Number(wo.actualCost ?? wo.labourCost ?? wo.cost ?? 0);
+      const extra = Number(wo.extraExpenses || 0) + Number(wo.materialsCost || 0);
+      const cost = baseActual + extra > 0 ? baseActual + extra : Number(wo.estimatedCost || 0);
 
       if (cost <= 0) return;
 
       const matchedUnit = resolveUnitFromPropAndNumber(wo.propertyId, wo.unitNumber);
-      const maintKey = `${wo.propertyId}_${String(wo.title || '').trim().toLowerCase()}`;
-      seenCompletedMaintenanceKeys.add(maintKey);
+      if (matchedUnit && softDeletedUnitsSet.has(matchedUnit.id)) return;
+      seenExpenseIds.add(wo.id);
 
       const categoryName = wo.vendor?.serviceType
         ? `Maintenance - ${wo.vendor.serviceType}`
@@ -729,6 +724,7 @@ export class ReportService {
     });
 
     serviceRequests.forEach((sr: any) => {
+      if (!sr || !sr.id || seenExpenseIds.has(sr.id) || softDeletedServiceReqsSet.has(sr.id)) return;
       const st = String(sr.status || '').toLowerCase().replace(/[\s_-]/g, '');
       if (st !== 'completed' && st !== 'closed') return;
 
@@ -736,25 +732,18 @@ export class ReportService {
         return;
       }
 
-      const maintKey = `${sr.propertyId}_${String(sr.title || '').trim().toLowerCase()}`;
-      if (seenCompletedMaintenanceKeys.has(maintKey)) {
-        // Already counted via completed WorkOrder for the same maintenance issue
-        return;
-      }
-
       const matchedUnit = resolveUnitFromPropAndNumber(sr.propertyId, sr.unitNumber);
-      if (sr.unitNumber && !matchedUnit) {
-        // Unit was deleted
+      if (matchedUnit && softDeletedUnitsSet.has(matchedUnit.id)) {
         return;
       }
 
-      const subCosts =
-        Number(sr.cost || 0) + Number(sr.labourCost || 0) + Number(sr.extraExpenses || 0);
-      const cost = subCosts > 0 ? subCosts : Number(sr.estimatedCost || 0);
+      const baseActual = Number(sr.labourCost || sr.cost || 0);
+      const extra = Number(sr.extraExpenses || 0);
+      const cost = baseActual + extra > 0 ? baseActual + extra : Number(sr.estimatedCost || 0);
 
       if (cost <= 0) return;
 
-      seenCompletedMaintenanceKeys.add(maintKey);
+      seenExpenseIds.add(sr.id);
 
       const categoryName =
         sr.category && sr.category !== 'General'
