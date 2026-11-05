@@ -365,14 +365,28 @@ export class ReportService {
       const paidAmount = Number(inv.paidAmount || 0);
       const outstandingBalance = Number(inv.balance ?? Math.max(0, rentAmount - paidAmount));
       const unitId = inv.tenant?.unitId || (inv.tenant as any)?.unit?.id || (inv as any).unitId || '';
-      const unitNumber = inv.unitNumber || ((inv.tenant as any)?.unit?.unitNumber ? (String((inv.tenant as any).unit.unitNumber).trim().toLowerCase().startsWith('unit') ? String((inv.tenant as any).unit.unitNumber).trim() : `Unit ${(inv.tenant as any).unit.unitNumber}`) : 'Unit 101');
+      const rawUnitStr = inv.unitNumber || (inv.tenant as any)?.unit?.unitNumber || '';
+      const unitNumber = rawUnitStr
+        ? String(rawUnitStr).trim().toLowerCase().startsWith('unit')
+          ? String(rawUnitStr).trim()
+          : `Unit ${String(rawUnitStr).trim()}`
+        : 'N/A';
+
+      let paymentStatus = inv.status || 'Overdue';
+      if (paidAmount > 0 && outstandingBalance > 0) {
+        paymentStatus = 'Partially Paid';
+      } else if (daysLate > 0 || String(inv.status || '').toLowerCase() === 'overdue') {
+        paymentStatus = 'Overdue';
+      } else {
+        paymentStatus = 'Unpaid';
+      }
 
       return {
         invoiceId: inv.id,
         tenantId: inv.tenantId,
         propertyId: inv.propertyId,
         unitId,
-        tenantName: inv.tenant ? `${inv.tenant.firstName} ${inv.tenant.lastName}` : (inv.tenantName || 'Resident'),
+        tenantName: inv.tenant ? `${inv.tenant.firstName} ${inv.tenant.lastName}` : (inv.tenantName || 'N/A'),
         propertyName: inv.propertyName || 'Property',
         unitNumber,
         dueDate: inv.dueDate ? new Date(inv.dueDate).toISOString().split('T')[0] : 'N/A',
@@ -380,7 +394,7 @@ export class ReportService {
         paidAmount,
         outstandingBalance,
         daysLate,
-        paymentStatus: inv.status || 'Overdue',
+        paymentStatus,
       };
     });
 
@@ -994,103 +1008,51 @@ export class ReportService {
       sortOrder: query.sortOrder,
     });
 
-    let data: any[] = result.payments.map((p: any, idx: number) => ({
-      paymentId: p.id,
-      tenantId: p.tenantId,
-      propertyId: p.propertyId,
-      unitId: p.unitId || p.unit?.id || p.tenant?.unitId || '',
-      receiptNo: `#${idx + 1}`,
-      tenantName: p.tenant ? `${p.tenant.firstName} ${p.tenant.lastName}` : (p.tenantName || 'Resident'),
-      propertyName: p.property?.name || p.propertyName || 'Property',
-      unitNumber: p.unit?.unitNumber
-        ? (String(p.unit.unitNumber).trim().toLowerCase().startsWith('unit') ? String(p.unit.unitNumber).trim() : `Unit ${p.unit.unitNumber}`)
-        : (p.unitNumber || 'Unassigned'),
-      paymentDate: p.paidDate ? new Date(p.paidDate).toISOString().split('T')[0] : (p.createdAt ? new Date(p.createdAt).toISOString().split('T')[0] : 'N/A'),
-      amount: Number(p.amount || 0),
-      paymentMethod: p.paymentMethod || 'ACH',
-      referenceNumber: p.referenceNumber || `#REF-${1001 + idx}`,
-      paymentStatus: p.status || 'Paid',
-    }));
+    const data: any[] = result.payments.map((p: any, idx: number) => {
+      const pStatusNorm = String(p.status || '').toLowerCase().replace(/[\s_-]/g, '');
+      const pMethodRaw = String(p.paymentMethod || 'Offline');
+      const isPartial =
+        pStatusNorm === 'partiallypaid' ||
+        pStatusNorm === 'partial' ||
+        pMethodRaw.toLowerCase().includes('partial');
+      const displayStatus = isPartial
+        ? 'Partially Paid'
+        : pStatusNorm === 'paid' || pStatusNorm === 'cleared' || pStatusNorm === 'completed' || !pStatusNorm
+        ? 'Paid'
+        : p.status;
+      const displayMethod = pMethodRaw === 'Offline_Partial' ? 'Offline (Partial)' : pMethodRaw;
 
-    if (data.length === 0) {
-      let shouldQueryInvoices = true;
-      if (query.paymentMethod && query.paymentMethod !== 'All Methods' && query.paymentMethod !== 'all') {
-        const pmClean = query.paymentMethod.toLowerCase().replace(/[\s_-]/g, '');
-        if (pmClean !== 'banktransfer') {
-          shouldQueryInvoices = false;
-        }
-      }
-
-      if (shouldQueryInvoices) {
-        const invStatusFilter: any = {};
-        if (query.status && query.status !== 'All Statuses' && query.status !== 'all') {
-          const stClean = query.status.toLowerCase().replace(/[\s_-]/g, '');
-          if (stClean === 'paid') {
-            invStatusFilter.in = ['Paid', 'PAID', 'paid'];
-          } else if (stClean === 'partiallypaid' || stClean === 'partially_paid') {
-            invStatusFilter.in = ['Partially Paid', 'PartiallyPaid', 'PARTIALLY_PAID'];
-          } else {
-            invStatusFilter.in = [query.status];
-          }
-        } else {
-          invStatusFilter.in = ['Paid', 'Partially Paid'];
-        }
-
-        const invoiceWhere: any = {
-          companyId,
-          propertyId: { in: query.propertyId ? [query.propertyId] : allowedProperties },
-          status: invStatusFilter,
-        };
-
-        if (query.startDate || query.endDate) {
-          invoiceWhere.updatedAt = {};
-          if (query.startDate) {
-            const s = new Date(query.startDate);
-            s.setHours(0, 0, 0, 0);
-            invoiceWhere.updatedAt.gte = s;
-          }
-          if (query.endDate) {
-            const e = new Date(query.endDate);
-            e.setHours(23, 59, 59, 999);
-            invoiceWhere.updatedAt.lte = e;
-          }
-        }
-
-        const paidInvoices = await prisma.invoice.findMany({
-          where: invoiceWhere,
-          include: { tenant: true },
-        });
-
-        data = paidInvoices.map((inv, idx) => ({
-          invoiceId: inv.id,
-          tenantId: inv.tenantId,
-          propertyId: inv.propertyId,
-          unitId: inv.tenant?.unitId || (inv as any).unitId || '',
-          receiptNo: `#INV-${1001 + idx}`,
-          tenantName: inv.tenant ? `${inv.tenant.firstName} ${inv.tenant.lastName}` : (inv.tenantName || 'Resident'),
-          propertyName: inv.propertyName || 'Property',
-          unitNumber: inv.unitNumber || 'Unassigned',
-          paymentDate: inv.updatedAt ? new Date(inv.updatedAt).toISOString().split('T')[0] : 'N/A',
-          amount: Number(inv.paidAmount || inv.amount || 0),
-          paymentMethod: 'Bank Transfer',
-          referenceNumber: `#INV-REF-${inv.id.substring(0, 6)}`,
-          paymentStatus: inv.status === 'Partially Paid' ? 'PartiallyPaid' : (inv.status || 'Paid'),
-        }));
-      }
-    }
+      return {
+        paymentId: p.id,
+        tenantId: p.tenantId,
+        propertyId: p.propertyId,
+        unitId: p.unitId || p.unit?.id || p.tenant?.unitId || '',
+        receiptNo: `#${idx + 1}`,
+        tenantName: p.tenant ? `${p.tenant.firstName} ${p.tenant.lastName}` : (p.tenantName || 'N/A'),
+        propertyName: p.property?.name || p.propertyName || 'Property',
+        unitNumber: p.unit?.unitNumber
+          ? (String(p.unit.unitNumber).trim().toLowerCase().startsWith('unit') ? String(p.unit.unitNumber).trim() : `Unit ${p.unit.unitNumber}`)
+          : (p.unitNumber || 'N/A'),
+        paymentDate: p.paidDate ? new Date(p.paidDate).toISOString().split('T')[0] : (p.createdAt ? new Date(p.createdAt).toISOString().split('T')[0] : 'N/A'),
+        amount: Number(p.amount || 0),
+        paymentMethod: displayMethod,
+        referenceNumber: p.referenceNumber || `#REF-${1001 + idx}`,
+        paymentStatus: displayStatus,
+      };
+    });
 
     let totalCollectedAmount = 0;
     const methodCounts: Record<string, number> = {};
 
     data.forEach((p) => {
-      if (['Paid', 'Partially Paid', 'PartiallyPaid', 'Cleared'].includes(p.paymentStatus) || !p.paymentStatus) {
+      if (['Paid', 'Partially Paid', 'PartiallyPaid', 'Cleared', 'Completed'].includes(p.paymentStatus) || !p.paymentStatus) {
         totalCollectedAmount += p.amount;
       }
-      const method = p.paymentMethod || 'ACH';
+      const method = p.paymentMethod || 'Offline';
       methodCounts[method] = (methodCounts[method] || 0) + 1;
     });
 
-    let topMethod = 'ACH';
+    let topMethod = 'N/A';
     let maxCount = 0;
     Object.entries(methodCounts).forEach(([m, count]) => {
       if (count > maxCount) {
@@ -1104,16 +1066,16 @@ export class ReportService {
     return {
       data,
       summary: {
-        totalCollectedAmount: result.summary?.totalCollectedAmount || totalCollectedAmount,
-        totalTransactions: result.summary?.totalTransactions || data.length,
-        averageTransaction: result.summary?.averageTransaction || averageTransaction,
+        totalCollectedAmount: result.summary?.totalCollectedAmount ?? totalCollectedAmount,
+        totalTransactions: result.summary?.totalTransactions ?? data.length,
+        averageTransaction: result.summary?.averageTransaction ?? averageTransaction,
         topMethod,
       },
       pagination: {
         page,
         limit,
-        totalRecords: result.totalRecords || data.length,
-        totalPages: Math.ceil((result.totalRecords || data.length) / limit) || (data.length > 0 ? 1 : 0),
+        totalRecords: result.totalRecords ?? data.length,
+        totalPages: Math.ceil((result.totalRecords ?? data.length) / limit) || (data.length > 0 ? 1 : 0),
       },
     };
   }

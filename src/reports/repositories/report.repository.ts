@@ -519,7 +519,10 @@ export class ReportRepository {
     sortOrder?: 'asc' | 'desc';
   }) {
     const { propertyIds, propertyId, unitId, tenantId, status, startDate, endDate, page, limit, sortBy, sortOrder = 'desc' } = params;
-    const activePropertyIds = propertyId ? [propertyId] : propertyIds;
+    const softDeleted = await this.getSoftDeletedIds(params.companyId);
+    const activePropertyIds = (propertyId ? propertyIds.filter((id) => id === propertyId) : propertyIds).filter(
+      (id) => !softDeleted.properties.includes(id)
+    );
 
     if (activePropertyIds.length === 0) {
       return { invoices: [], totalRecords: 0, summary: { totalDelinquentBalance: 0, totalOriginalAmount: 0, totalDelinquentTenants: 0, totalDelinquentInvoices: 0, averageDaysLate: 0 } };
@@ -532,6 +535,7 @@ export class ReportRepository {
           propertyId: { in: activePropertyIds },
           ...(params.companyId ? { companyId: params.companyId } : {}),
           ...(tenantId ? { tenantId } : {}),
+          ...(softDeleted.invoices.length > 0 ? { id: { notIn: softDeleted.invoices } } : {}),
         },
       });
 
@@ -540,6 +544,7 @@ export class ReportRepository {
           propertyId: { in: activePropertyIds },
           ...(params.companyId ? { companyId: params.companyId } : {}),
           ...(tenantId ? { tenantId } : {}),
+          ...(softDeleted.payments.length > 0 ? { id: { notIn: softDeleted.payments } } : {}),
           status: { in: ['Paid', 'PartiallyPaid'] as any },
         },
         include: {
@@ -553,7 +558,7 @@ export class ReportRepository {
 
         const matchedPayments = propertyPayments.filter((p: any) => {
           if (p.invoiceId && p.invoiceId === inv.id) return true;
-          const pMonth = p.paidDate ? new Date(p.paidDate).toISOString().slice(0, 7) : '';
+          const pMonth = String(p.dueDate || p.paidDate || '').slice(0, 7);
           const pTenantName = p.tenant ? `${p.tenant.firstName} ${p.tenant.lastName}` : (p.tenantName || '');
           const tMatch = (p.tenantId && inv.tenantId && p.tenantId === inv.tenantId) ||
             (pTenantName && inv.tenantName && pTenantName.trim().toLowerCase() === inv.tenantName.trim().toLowerCase());
@@ -587,6 +592,11 @@ export class ReportRepository {
     const whereClause: any = {
       propertyId: { in: activePropertyIds },
       ...(params.companyId ? { companyId: params.companyId } : {}),
+      ...(softDeleted.invoices.length > 0 ? { id: { notIn: softDeleted.invoices } } : {}),
+      ...(softDeleted.tenants.length > 0 ? { tenantId: { notIn: softDeleted.tenants } } : {}),
+      tenant: {
+        status: { notIn: ['Inactive', 'Deleted'] as any },
+      },
     };
 
     if (tenantId) {
@@ -1015,7 +1025,10 @@ export class ReportRepository {
       sortOrder = 'desc',
     } = params;
 
-    const activePropertyIds = propertyId ? [propertyId] : propertyIds;
+    const softDeleted = await this.getSoftDeletedIds(params.companyId);
+    const activePropertyIds = (propertyId ? propertyIds.filter((id) => id === propertyId) : propertyIds).filter(
+      (id) => !softDeleted.properties.includes(id)
+    );
 
     if (activePropertyIds.length === 0) {
       return { payments: [], totalRecords: 0, summary: { totalCollectedAmount: 0, totalTransactions: 0, averageTransaction: 0, methodMap: {} } };
@@ -1023,8 +1036,14 @@ export class ReportRepository {
 
     const whereClause: any = {
       propertyId: { in: activePropertyIds },
+      ...(softDeleted.payments.length > 0 ? { id: { notIn: softDeleted.payments } } : {}),
+      ...(softDeleted.units.length > 0 ? { unitId: { notIn: softDeleted.units } } : {}),
+      ...(softDeleted.tenants.length > 0 ? { tenantId: { notIn: softDeleted.tenants } } : {}),
       property: {
-        status: { notIn: ['Inactive', 'Deleted'] },
+        status: { notIn: ['Inactive', 'Deleted', 'Draft'] },
+      },
+      tenant: {
+        status: { notIn: ['Inactive', 'Deleted'] as any },
       },
     };
 
@@ -1035,6 +1054,9 @@ export class ReportRepository {
     const andConditions: any[] = [];
 
     if (unitId) {
+      if (softDeleted.units.includes(unitId)) {
+        return { payments: [], totalRecords: 0, summary: { totalCollectedAmount: 0, totalTransactions: 0, averageTransaction: 0, methodMap: {} } };
+      }
       andConditions.push({
         OR: [
           { unitId },
@@ -1044,44 +1066,28 @@ export class ReportRepository {
     }
 
     if (tenantId) {
+      if (softDeleted.tenants.includes(tenantId)) {
+        return { payments: [], totalRecords: 0, summary: { totalCollectedAmount: 0, totalTransactions: 0, averageTransaction: 0, methodMap: {} } };
+      }
       whereClause.tenantId = tenantId;
     }
 
     if (paymentMethod && paymentMethod !== 'All Methods' && paymentMethod !== 'all') {
-      const pmClean = paymentMethod.toLowerCase().replace(/[\s_-]/g, '');
-      const pmMap: Record<string, string> = {
-        ach: 'ACH',
-        creditcard: 'CreditCard',
-        debitcard: 'DebitCard',
-        banktransfer: 'BankTransfer',
-        wiretransfer: 'WireTransfer',
-        cash: 'Cash',
-        check: 'Check',
-        moneyorder: 'MoneyOrder',
-        zelle: 'Zelle',
-        offline: 'Offline',
-      };
-      const validPm = pmMap[pmClean];
-      if (validPm) {
-        whereClause.paymentMethod = validPm;
+      if (paymentMethod.toLowerCase().includes('offline')) {
+        whereClause.paymentMethod = { in: ['Offline', 'Offline_Partial', 'offline', 'offline_partial'] };
+      } else {
+        whereClause.paymentMethod = { in: [paymentMethod, paymentMethod.toLowerCase(), paymentMethod.toUpperCase()] };
       }
     }
 
     if (status && status !== 'All Statuses' && status !== 'all') {
-      const stClean = status.toLowerCase().replace(/[\s_-]/g, '');
-      const stMap: Record<string, string> = {
-        pending: 'Pending',
-        paid: 'Paid',
-        partiallypaid: 'PartiallyPaid',
-        partially_paid: 'PartiallyPaid',
-        partial: 'PartiallyPaid',
-        failed: 'Failed',
-        refunded: 'Refunded',
-        voided: 'Voided',
-      };
-      const validStatus = stMap[stClean];
-      if (validStatus) {
-        whereClause.status = validStatus;
+      const stNorm = status.toLowerCase().replace(/[\s_-]/g, '');
+      if (stNorm === 'partiallypaid' || stNorm === 'partial') {
+        whereClause.status = { in: ['PartiallyPaid', 'Partially Paid', 'Partial'] as any };
+      } else if (stNorm === 'paid') {
+        whereClause.status = { in: ['Paid', 'Cleared', 'Completed'] as any };
+      } else {
+        whereClause.status = { in: [status, status.toLowerCase(), status.toUpperCase()] as any };
       }
     }
 
@@ -1114,7 +1120,7 @@ export class ReportRepository {
     let orderBy: any = { paidDate: sortOrder };
     if (sortBy === 'amount') orderBy = { amount: sortOrder };
 
-    const [payments, totalRecords, allPayments] = await Promise.all([
+    const [rawPayments, totalRecords, allPayments] = await Promise.all([
       prisma.rentPayment.findMany({
         where: whereClause,
         include: {
@@ -1132,42 +1138,35 @@ export class ReportRepository {
       }),
     ]);
 
+    const payments = rawPayments.filter(
+      (p: any) => !(p.referenceNumber && String(p.referenceNumber).toUpperCase().startsWith('REFUND-'))
+    );
+    const validAllPayments = allPayments.filter(
+      (p: any) => !(p.referenceNumber && String(p.referenceNumber).toUpperCase().startsWith('REFUND-'))
+    );
+
     let totalCollectedAmount = 0;
     const methodMap: Record<string, number> = {};
 
-    allPayments.forEach((p: any) => {
-      if (['Paid', 'PartiallyPaid', 'Cleared'].includes(p.status) || !p.status) {
+    validAllPayments.forEach((p: any) => {
+      if (['Paid', 'PartiallyPaid', 'Partially Paid', 'Cleared', 'Completed'].includes(p.status) || !p.status) {
         const amt = Number(p.amount || 0);
         totalCollectedAmount += amt;
       }
-      const m = p.paymentMethod || 'ACH';
+      const m = p.paymentMethod || 'Offline';
       methodMap[m] = (methodMap[m] || 0) + 1;
     });
 
-    // If rentPayment is empty, aggregate paid invoices
-    if (allPayments.length === 0) {
-      const paidInvoices = await prisma.invoice.findMany({
-        where: {
-          propertyId: { in: activePropertyIds },
-          status: { in: ['Paid', 'Partially Paid'] },
-        },
-      });
-
-      paidInvoices.forEach((inv) => {
-        totalCollectedAmount += Number(inv.paidAmount || inv.amount || 0);
-      });
-    }
-
-    const averageTransaction = allPayments.length > 0
-      ? Math.round(totalCollectedAmount / allPayments.length)
+    const averageTransaction = validAllPayments.length > 0
+      ? Math.round(totalCollectedAmount / validAllPayments.length)
       : 0;
 
     return {
       payments,
-      totalRecords,
+      totalRecords: validAllPayments.length,
       summary: {
         totalCollectedAmount,
-        totalTransactions: totalRecords || allPayments.length,
+        totalTransactions: validAllPayments.length,
         averageTransaction,
         methodMap,
       },

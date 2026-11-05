@@ -196,7 +196,7 @@ class InvoiceController {
   async update(req: AuthenticatedRequest, res: Response, next: NextFunction) {
     try {
       const id = req.params.id as string;
-      const { status, paidAmount, balance, notes } = req.body;
+      const { status, amount, paidAmount, balance, notes, lineItems, dueDate } = req.body;
       const companyId = req.user?.companyId;
 
       if (companyId) {
@@ -210,9 +210,14 @@ class InvoiceController {
         where: { id },
         data: {
           ...(status && { status }),
+          ...(amount !== undefined && { amount: parseFloat(amount) }),
           ...(paidAmount !== undefined && { paidAmount: parseFloat(paidAmount) }),
           ...(balance !== undefined && { balance: parseFloat(balance) }),
           ...(notes !== undefined && { notes }),
+          ...(dueDate !== undefined && { dueDate: String(dueDate) }),
+          ...(lineItems !== undefined && {
+            lineItems: typeof lineItems === 'string' ? lineItems : JSON.stringify(lineItems),
+          }),
         },
       });
 

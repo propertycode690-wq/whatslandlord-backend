@@ -554,35 +554,65 @@ export class PaymentService {
 
 
 
-      const unpaidInvoices = await tx.invoice.findMany({
-        where: { tenantId, status: { in: ['Sent', 'Overdue', 'Partially Paid', 'Unpaid', 'Draft'] } },
-        orderBy: { dueDate: 'asc' },
-      });
+      if (data.invoiceId) {
+        const targetInvoice = await tx.invoice.findUnique({
+          where: { id: String(data.invoiceId) },
+        });
+        if (targetInvoice) {
+          const payAmt = Number(data.amount || 0);
+          const invAmt = Number(targetInvoice.amount || 0);
+          const currentPaid = Number(targetInvoice.paidAmount || 0);
+          const currentBal = Number(targetInvoice.balance ?? Math.max(0, invAmt - currentPaid));
 
-      let remainingAmount = Number(data.amount);
-      for (const invoice of unpaidInvoices) {
-        if (remainingAmount <= 0) break;
-        const currentBalance = invoice.balance || 0;
-        if (remainingAmount >= currentBalance) {
+          // If the invoice was created concurrently with paidAmount already set to this payment amount, do not double-count
+          const isAlreadyPreApplied =
+            Math.abs(currentPaid - payAmt) < 0.01 &&
+            Math.abs(currentBal - Math.max(0, invAmt - payAmt)) < 0.01;
+
+          const newPaid = isAlreadyPreApplied ? currentPaid : Math.min(invAmt, currentPaid + payAmt);
+          const newBal = Math.max(0, invAmt - newPaid);
+          const newStatus = newBal <= 0 ? 'Paid' : newPaid > 0 ? 'Partially Paid' : targetInvoice.status;
+
           await tx.invoice.update({
-            where: { id: invoice.id },
+            where: { id: targetInvoice.id },
             data: {
-              paidAmount: { increment: currentBalance },
-              balance: 0,
-              status: 'Paid',
+              paidAmount: newPaid,
+              balance: newBal,
+              status: newStatus,
             },
           });
-          remainingAmount -= currentBalance;
-        } else {
-          await tx.invoice.update({
-            where: { id: invoice.id },
-            data: {
-              paidAmount: { increment: remainingAmount },
-              balance: { decrement: remainingAmount },
-              status: 'Partially Paid',
-            },
-          });
-          remainingAmount = 0;
+        }
+      } else {
+        const unpaidInvoices = await tx.invoice.findMany({
+          where: { tenantId, status: { in: ['Sent', 'Overdue', 'Partially Paid', 'Unpaid', 'Draft'] } },
+          orderBy: { dueDate: 'asc' },
+        });
+
+        let remainingAmount = Number(data.amount);
+        for (const invoice of unpaidInvoices) {
+          if (remainingAmount <= 0) break;
+          const currentBalance = invoice.balance || 0;
+          if (remainingAmount >= currentBalance) {
+            await tx.invoice.update({
+              where: { id: invoice.id },
+              data: {
+                paidAmount: { increment: currentBalance },
+                balance: 0,
+                status: 'Paid',
+              },
+            });
+            remainingAmount -= currentBalance;
+          } else {
+            await tx.invoice.update({
+              where: { id: invoice.id },
+              data: {
+                paidAmount: { increment: remainingAmount },
+                balance: { decrement: remainingAmount },
+                status: 'Partially Paid',
+              },
+            });
+            remainingAmount = 0;
+          }
         }
       }
 
@@ -698,13 +728,22 @@ export class PaymentService {
           });
         }
 
-        // Sync associated invoice balance & status if any
-        const linkedInvoice = await tx.invoice.findFirst({
+        // Sync associated invoice balance & status if any (match by invoiceId or dueDate month first)
+        const payMonth = existingPayment.dueDate
+          ? new Date(existingPayment.dueDate).toISOString().slice(0, 7)
+          : existingPayment.paidDate
+          ? new Date(existingPayment.paidDate).toISOString().slice(0, 7)
+          : '';
+        const tenantInvoices = await tx.invoice.findMany({
           where: {
             tenantId: existingPayment.tenantId,
           },
           orderBy: { createdAt: 'desc' },
         });
+        const linkedInvoice =
+          (data.invoiceId && tenantInvoices.find((inv: any) => inv.id === data.invoiceId)) ||
+          (payMonth && tenantInvoices.find((inv: any) => String(inv.dueDate || '').slice(0, 7) === payMonth)) ||
+          tenantInvoices[0];
         if (linkedInvoice) {
           const newPaidAmount = Math.max(0, (linkedInvoice.paidAmount || 0) + diff);
           const newBalance = Math.max(0, linkedInvoice.amount - newPaidAmount);
@@ -749,10 +788,22 @@ export class PaymentService {
     }
 
     return prisma.$transaction(async (tx: any) => {
-      const tenantInvoices = await tx.invoice.findMany({
+      const payMonth = payment.dueDate
+        ? new Date(payment.dueDate).toISOString().slice(0, 7)
+        : payment.paidDate
+        ? new Date(payment.paidDate).toISOString().slice(0, 7)
+        : '';
+      const rawTenantInvoices = await tx.invoice.findMany({
         where: { tenantId: payment.tenantId },
         orderBy: { dueDate: 'desc' },
       });
+      // Prioritize the invoice matching this payment's billing month first
+      const tenantInvoices = payMonth
+        ? [
+            ...rawTenantInvoices.filter((inv: any) => String(inv.dueDate || '').slice(0, 7) === payMonth),
+            ...rawTenantInvoices.filter((inv: any) => String(inv.dueDate || '').slice(0, 7) !== payMonth),
+          ]
+        : rawTenantInvoices;
 
       let amountToRevert = payment.amount;
       for (const invoice of tenantInvoices) {
@@ -761,7 +812,7 @@ export class PaymentService {
           const revertFromInvoice = Math.min(amountToRevert, invoice.paidAmount);
           const newPaidAmount = invoice.paidAmount - revertFromInvoice;
           const newBalance = invoice.balance + revertFromInvoice;
-          const newStatus = newPaidAmount === 0 ? 'Unpaid' : 'Partially Paid';
+          const newStatus = newPaidAmount === 0 ? 'Overdue' : 'Partially Paid';
 
           await tx.invoice.update({
             where: { id: invoice.id },
