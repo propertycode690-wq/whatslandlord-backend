@@ -404,218 +404,473 @@ export class ReportService {
 
   // 4. Profit & Loss Report
   async getProfitLoss(user: any, query: any) {
+    const emptyResponse = {
+      data: {
+        income: [],
+        expenses: [],
+        transactions: [],
+        summary: { totalIncome: 0, totalExpenses: 0, netProfit: 0 },
+      },
+      transactions: [],
+      summary: { totalIncome: 0, totalExpenses: 0, netProfit: 0 },
+      pagination: { page: 1, limit: 50, totalRecords: 0, totalPages: 0 },
+    };
+
     const companyId = user?.companyId;
     const allowedProperties = await this.resolveAllowedProperties(user, companyId);
     if (!companyId || allowedProperties.length === 0) {
-      return {
-        data: {
-          income: [],
-          expenses: [],
-          transactions: [],
-          summary: { totalIncome: 0, totalExpenses: 0, netProfit: 0 },
-        },
-        transactions: [],
-        summary: { totalIncome: 0, totalExpenses: 0, netProfit: 0 },
-        pagination: { page: 1, limit: 50, totalRecords: 0, totalPages: 0 },
-      };
+      return emptyResponse;
     }
 
-    const targetPropIds = query.propertyId
-      ? allowedProperties.filter((id) => id === query.propertyId)
-      : allowedProperties;
-    if (targetPropIds.length === 0) {
-      return {
-        data: {
-          income: [],
-          expenses: [],
-          transactions: [],
-          summary: { totalIncome: 0, totalExpenses: 0, netProfit: 0 },
-        },
-        transactions: [],
-        summary: { totalIncome: 0, totalExpenses: 0, netProfit: 0 },
-        pagination: { page: 1, limit: 50, totalRecords: 0, totalPages: 0 },
-      };
+    const softDeleted = await this.reportRepository.getSoftDeletedIds(companyId);
+
+    const candidatePropIds = (
+      query.propertyId
+        ? allowedProperties.filter((id) => id === query.propertyId)
+        : allowedProperties
+    ).filter((id) => !softDeleted.properties.includes(id));
+
+    if (candidatePropIds.length === 0) {
+      return emptyResponse;
     }
-    const propertyFilter = { propertyId: { in: targetPropIds } };
 
-    const startDate = query.startDate ? new Date(query.startDate) : undefined;
-    const endDate = query.endDate ? new Date(query.endDate) : undefined;
-
-    const lines = await this.reportRepository.getProfitLossData({
-      companyId,
-      propertyIds: allowedProperties,
-      propertyId: query.propertyId,
-      startDate,
-      endDate,
+    // Verify properties are active and belong strictly to this company
+    const activeProps = await prisma.property.findMany({
+      where: {
+        id: { in: candidatePropIds },
+        companyId,
+        status: { notIn: ['Inactive', 'Deleted', 'Draft'] },
+      },
+      select: { id: true, name: true },
     });
 
+    const targetPropIds = activeProps.map((p) => p.id);
+    if (targetPropIds.length === 0) {
+      return emptyResponse;
+    }
+
+    const propNameMap = new Map<string, string>(activeProps.map((p) => [p.id, p.name]));
+
+    // Fetch active units and active tenants to ensure deleted/inactive units or tenants are never calculated
+    const [activeUnits, activeTenants] = await Promise.all([
+      prisma.unit.findMany({
+        where: {
+          propertyId: { in: targetPropIds },
+          ...(softDeleted.units.length > 0 ? { id: { notIn: softDeleted.units } } : {}),
+        },
+        select: { id: true, unitNumber: true, propertyId: true },
+      }),
+      prisma.tenant.findMany({
+        where: {
+          companyId,
+          status: { not: 'Inactive' as any },
+          ...(softDeleted.tenants.length > 0 ? { id: { notIn: softDeleted.tenants } } : {}),
+        },
+        select: { id: true, firstName: true, lastName: true, unitId: true },
+      }),
+    ]);
+
+    const activeUnitIds = new Set<string>(activeUnits.map((u) => u.id));
+    const activeTenantIds = new Set<string>(activeTenants.map((t) => t.id));
+    const unitByIdMap = new Map(activeUnits.map((u) => [u.id, u]));
+
+    const normalizeUnitNum = (val?: string | null) =>
+      String(val || '')
+        .toLowerCase()
+        .replace(/^unit\s*/i, '')
+        .trim();
+
+    const formatUnitDisplay = (val?: string | null) => {
+      const raw = String(val || '').trim();
+      if (!raw) return 'N/A';
+      return raw.toLowerCase().startsWith('unit') ? raw : `Unit ${raw}`;
+    };
+
+    const resolveUnitFromPropAndNumber = (propId?: string | null, unitNumber?: string | null) => {
+      if (!propId || !unitNumber) return null;
+      const targetNum = normalizeUnitNum(unitNumber);
+      if (!targetNum) return null;
+      return (
+        activeUnits.find(
+          (u) => u.propertyId === propId && normalizeUnitNum(u.unitNumber) === targetNum
+        ) || null
+      );
+    };
+
+    const propertyFilter = { propertyId: { in: targetPropIds } };
+
+    const [payments, invoices, workOrders, serviceRequests] = await Promise.all([
+      prisma.rentPayment.findMany({
+        where: {
+          ...propertyFilter,
+          companyId,
+          status: { in: ['Paid', 'PartiallyPaid'] as any },
+          ...(softDeleted.payments.length > 0 ? { id: { notIn: softDeleted.payments } } : {}),
+          ...(softDeleted.tenants.length > 0
+            ? { OR: [{ tenantId: null }, { tenantId: { notIn: softDeleted.tenants } }] }
+            : {}),
+          ...(softDeleted.units.length > 0
+            ? { OR: [{ unitId: null }, { unitId: { notIn: softDeleted.units } }] }
+            : {}),
+          ...(softDeleted.leases.length > 0
+            ? { OR: [{ leaseId: null }, { leaseId: { notIn: softDeleted.leases } }] }
+            : {}),
+        },
+        include: { property: true, tenant: true, unit: true },
+      }),
+      prisma.invoice.findMany({
+        where: {
+          ...propertyFilter,
+          companyId,
+          status: { in: ['Paid', 'Partially Paid'] },
+          ...(softDeleted.invoices.length > 0 ? { id: { notIn: softDeleted.invoices } } : {}),
+          ...(softDeleted.tenants.length > 0
+            ? { OR: [{ tenantId: null }, { tenantId: { notIn: softDeleted.tenants } }] }
+            : {}),
+        },
+        include: { tenant: true },
+      }),
+      prisma.workOrder.findMany({
+        where: {
+          ...propertyFilter,
+          companyId,
+          status: { in: ['Completed', 'Closed'] as any },
+          ...(softDeleted.workOrders.length > 0 ? { id: { notIn: softDeleted.workOrders } } : {}),
+        },
+        include: { property: true, vendor: true },
+      }),
+      prisma.serviceRequest.findMany({
+        where: {
+          ...propertyFilter,
+          companyId,
+          status: { in: ['Completed', 'Closed', 'completed', 'closed'] },
+          ...(softDeleted.serviceRequests.length > 0
+            ? { id: { notIn: softDeleted.serviceRequests } }
+            : {}),
+        },
+      }),
+    ]);
+
+    const allTransactions: any[] = [];
+
+    // Track total paid via RentPayment per tenant to prevent double-counting when Invoice is also marked Paid
+    const remainingPaymentCreditByTenant = new Map<string, number>();
+
+    const getTenantDedupKey = (tenantId?: string | null, tenantName?: string | null, propId?: string | null) => {
+      if (tenantId) return `id:${tenantId}`;
+      return `name:${String(tenantName || '').trim().toLowerCase()}_${propId || ''}`;
+    };
+
+    // 1. Process Real Paid Rent Payments (Strictly active properties, active units, active tenants)
+    payments.forEach((p) => {
+      // Skip tenant refund entries created in rent_payments
+      if (p.referenceNumber && String(p.referenceNumber).toUpperCase().startsWith('REFUND-')) {
+        return;
+      }
+      // Skip if linked unit was deleted or does not belong to active units
+      const resolvedUnitId = p.unitId || p.tenant?.unitId || null;
+      if (resolvedUnitId && !activeUnitIds.has(resolvedUnitId)) {
+        return;
+      }
+      // Skip if linked tenant is inactive or soft-deleted
+      if (p.tenantId && !activeTenantIds.has(p.tenantId)) {
+        return;
+      }
+      if (p.tenant && (p.tenant as any).status === 'Inactive') {
+        return;
+      }
+
+      const amt = Number(p.amount || 0);
+      if (amt <= 0) return;
+
+      const tenantName = p.tenant
+        ? `${p.tenant.firstName || ''} ${p.tenant.lastName || ''}`.trim()
+        : '';
+      const tKey = getTenantDedupKey(p.tenantId, tenantName, p.propertyId);
+      remainingPaymentCreditByTenant.set(tKey, (remainingPaymentCreditByTenant.get(tKey) || 0) + amt);
+
+      const dateObj = p.paidDate || p.dueDate;
+      const dateStr = dateObj ? new Date(dateObj).toISOString().split('T')[0] : 'N/A';
+      const unitObj = resolvedUnitId ? unitByIdMap.get(resolvedUnitId) : null;
+      const rawUnitNum = p.unit?.unitNumber || unitObj?.unitNumber || '';
+
+      allTransactions.push({
+        id: p.id,
+        date: dateStr,
+        description: `Rent payment - ${tenantName || 'Tenant'}`,
+        propertyId: p.propertyId,
+        unitId: resolvedUnitId || '',
+        tenantId: p.tenantId || '',
+        tenantName: tenantName || 'N/A',
+        propertyName: p.property?.name || (p.propertyId ? propNameMap.get(p.propertyId) : '') || 'Property',
+        unitNumber: formatUnitDisplay(rawUnitNum),
+        category: 'Rental Revenue',
+        type: 'Income',
+        amount: amt,
+      });
+    });
+
+    // 2. Process Paid Invoices ONLY for amounts not already accounted for by RentPayment records
+    invoices.forEach((inv) => {
+      if (inv.tenantId && !activeTenantIds.has(inv.tenantId)) {
+        return;
+      }
+      if (inv.tenant && (inv.tenant as any).status === 'Inactive') {
+        return;
+      }
+
+      const matchedUnit =
+        (inv.tenant?.unitId ? unitByIdMap.get(inv.tenant.unitId) : null) ||
+        resolveUnitFromPropAndNumber(inv.propertyId, inv.unitNumber);
+
+      // If invoice specifies a unit or tenant unit that was deleted, skip
+      if (inv.tenant?.unitId && !activeUnitIds.has(inv.tenant.unitId)) {
+        return;
+      }
+      if (inv.unitNumber && !matchedUnit) {
+        return;
+      }
+
+      // Skip security deposit invoices from P&L revenue (deposits are liabilities, not operating income)
+      const notesLower = String(inv.notes || '').toLowerCase();
+      const lineItemsLower = String(inv.lineItems || '').toLowerCase();
+      if (
+        (notesLower.includes('security deposit') || lineItemsLower.includes('security_deposit')) &&
+        !notesLower.includes('rent') &&
+        !lineItemsLower.includes('"rent"')
+      ) {
+        return;
+      }
+
+      const rawPaidAmt = Number(inv.paidAmount > 0 ? inv.paidAmount : inv.status === 'Paid' ? inv.amount : 0);
+      if (rawPaidAmt <= 0) return;
+
+      const tenantName =
+        inv.tenantName ||
+        (inv.tenant ? `${inv.tenant.firstName || ''} ${inv.tenant.lastName || ''}`.trim() : '');
+      const tKey = getTenantDedupKey(inv.tenantId, tenantName, inv.propertyId);
+      const availableCredit = remainingPaymentCreditByTenant.get(tKey) || 0;
+
+      if (availableCredit >= rawPaidAmt) {
+        // Fully covered by a RentPayment record already added above
+        remainingPaymentCreditByTenant.set(tKey, availableCredit - rawPaidAmt);
+        return;
+      }
+
+      const unaccountedAmt = rawPaidAmt - availableCredit;
+      remainingPaymentCreditByTenant.set(tKey, 0);
+
+      if (unaccountedAmt <= 0.01) return;
+
+      const dateStr = inv.dueDate
+        ? inv.dueDate.includes('T')
+          ? inv.dueDate.split('T')[0]
+          : inv.dueDate
+        : inv.createdAt
+          ? inv.createdAt.toISOString().split('T')[0]
+          : 'N/A';
+
+      allTransactions.push({
+        id: inv.id,
+        date: dateStr,
+        description: `Rent payment - ${tenantName || 'Tenant'}`,
+        propertyId: inv.propertyId,
+        unitId: matchedUnit?.id || inv.tenant?.unitId || '',
+        tenantId: inv.tenantId || '',
+        tenantName: tenantName || 'N/A',
+        propertyName: propNameMap.get(inv.propertyId) || inv.propertyName || 'Property',
+        unitNumber: formatUnitDisplay(matchedUnit?.unitNumber || inv.unitNumber),
+        category: 'Rental Revenue',
+        type: 'Income',
+        amount: Number(unaccountedAmt.toFixed(2)),
+      });
+    });
+
+    // 3. Process Completed / Closed Work Orders & Service Requests as Operating Expenses (no Open/Estimated/Deleted items)
+    const seenCompletedMaintenanceKeys = new Set<string>();
+
+    workOrders.forEach((wo: any) => {
+      const st = String(wo.status || '').toLowerCase();
+      if (st !== 'completed' && st !== 'closed') return;
+
+      const subCosts =
+        Number(wo.labourCost || 0) + Number(wo.materialsCost || 0) + Number(wo.extraExpenses || 0);
+      const cost =
+        Number(wo.actualCost || 0) > 0
+          ? Number(wo.actualCost)
+          : subCosts > 0
+            ? subCosts
+            : Number(wo.estimatedCost || 0);
+
+      if (cost <= 0) return;
+
+      const matchedUnit = resolveUnitFromPropAndNumber(wo.propertyId, wo.unitNumber);
+      const maintKey = `${wo.propertyId}_${String(wo.title || '').trim().toLowerCase()}`;
+      seenCompletedMaintenanceKeys.add(maintKey);
+
+      const categoryName = wo.vendor?.serviceType
+        ? `Maintenance - ${wo.vendor.serviceType}`
+        : 'Property Maintenance & Repairs';
+
+      allTransactions.push({
+        id: wo.id,
+        date: wo.createdAt ? new Date(wo.createdAt).toISOString().split('T')[0] : 'N/A',
+        description: wo.title || 'Completed Work Order',
+        propertyId: wo.propertyId,
+        unitId: matchedUnit?.id || '',
+        tenantId: '',
+        tenantName: 'N/A',
+        propertyName: wo.property?.name || propNameMap.get(wo.propertyId) || 'Property',
+        unitNumber: formatUnitDisplay(matchedUnit?.unitNumber || wo.unitNumber),
+        category: categoryName,
+        type: 'Expense',
+        amount: Number(cost.toFixed(2)),
+      });
+    });
+
+    serviceRequests.forEach((sr: any) => {
+      const st = String(sr.status || '').toLowerCase().replace(/[\s_-]/g, '');
+      if (st !== 'completed' && st !== 'closed') return;
+
+      if (sr.tenantId && softDeleted.tenants.includes(sr.tenantId)) {
+        return;
+      }
+
+      const maintKey = `${sr.propertyId}_${String(sr.title || '').trim().toLowerCase()}`;
+      if (seenCompletedMaintenanceKeys.has(maintKey)) {
+        // Already counted via completed WorkOrder for the same maintenance issue
+        return;
+      }
+
+      const matchedUnit = resolveUnitFromPropAndNumber(sr.propertyId, sr.unitNumber);
+      if (sr.unitNumber && !matchedUnit) {
+        // Unit was deleted
+        return;
+      }
+
+      const subCosts =
+        Number(sr.cost || 0) + Number(sr.labourCost || 0) + Number(sr.extraExpenses || 0);
+      const cost = subCosts > 0 ? subCosts : Number(sr.estimatedCost || 0);
+
+      if (cost <= 0) return;
+
+      seenCompletedMaintenanceKeys.add(maintKey);
+
+      const categoryName =
+        sr.category && sr.category !== 'General'
+          ? `Maintenance - ${sr.category}`
+          : 'Property Maintenance & Repairs';
+
+      allTransactions.push({
+        id: sr.id,
+        date: sr.createdAt ? new Date(sr.createdAt).toISOString().split('T')[0] : 'N/A',
+        description: sr.title || 'Completed Service Request',
+        propertyId: sr.propertyId,
+        unitId: matchedUnit?.id || '',
+        tenantId: sr.tenantId || '',
+        tenantName: sr.tenantName || 'N/A',
+        propertyName: propNameMap.get(sr.propertyId) || sr.propertyName || 'Property',
+        unitNumber: formatUnitDisplay(matchedUnit?.unitNumber || sr.unitNumber),
+        category: categoryName,
+        type: 'Expense',
+        amount: Number(cost.toFixed(2)),
+      });
+    });
+
+    // 4. Apply query-level filters (unitId, tenantId, status/type, startDate, endDate, search)
+    const startMs = query.startDate ? new Date(query.startDate).getTime() : null;
+    const endMs = query.endDate
+      ? (() => {
+          const d = new Date(query.endDate);
+          d.setHours(23, 59, 59, 999);
+          return d.getTime();
+        })()
+      : null;
+
+    const selectedUnitObj = query.unitId ? unitByIdMap.get(query.unitId) : null;
+    const selectedTenantObj = query.tenantId
+      ? activeTenants.find((t) => t.id === query.tenantId)
+      : null;
+
+    const transactions = allTransactions.filter((t) => {
+      if (query.unitId) {
+        const idMatches = t.unitId && t.unitId === query.unitId;
+        const numMatches =
+          selectedUnitObj &&
+          normalizeUnitNum(t.unitNumber) &&
+          normalizeUnitNum(t.unitNumber) === normalizeUnitNum(selectedUnitObj.unitNumber);
+        if (!idMatches && !numMatches) return false;
+      }
+
+      if (query.tenantId) {
+        const idMatches = t.tenantId && t.tenantId === query.tenantId;
+        const selectedName = selectedTenantObj
+          ? `${selectedTenantObj.firstName || ''} ${selectedTenantObj.lastName || ''}`.trim().toLowerCase()
+          : '';
+        const nameMatches =
+          selectedName && String(t.tenantName || '').trim().toLowerCase() === selectedName;
+        if (!idMatches && !nameMatches) return false;
+      }
+
+      if (query.status && query.status !== 'All Statuses' && query.status !== 'all') {
+        const sf = String(query.status).trim().toLowerCase();
+        if (String(t.type || '').toLowerCase() !== sf) return false;
+      }
+
+      if (startMs !== null || endMs !== null) {
+        if (!t.date || t.date === 'N/A') return false;
+        const tMs = new Date(t.date).getTime();
+        if (isNaN(tMs)) return false;
+        if (startMs !== null && tMs < startMs) return false;
+        if (endMs !== null && tMs > endMs) return false;
+      }
+
+      if (query.search) {
+        const q = String(query.search).trim().toLowerCase();
+        const hay = `${t.description || ''} ${t.propertyName || ''} ${t.unitNumber || ''} ${t.category || ''} ${t.type || ''} ${t.tenantName || ''}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+
+      return true;
+    });
+
+    // 5. Sort transactions
+    const sortBy = query.sortBy || 'date';
+    const sortOrder = query.sortOrder === 'asc' ? 'asc' : 'desc';
+    transactions.sort((a, b) => {
+      if (sortBy === 'amount') {
+        return sortOrder === 'asc' ? a.amount - b.amount : b.amount - a.amount;
+      }
+      if (sortBy === 'propertyName' || sortBy === 'category' || sortBy === 'type' || sortBy === 'description') {
+        const valA = String(a[sortBy] || '').toLowerCase();
+        const valB = String(b[sortBy] || '').toLowerCase();
+        return sortOrder === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA);
+      }
+      const dateA = a.date && a.date !== 'N/A' ? new Date(a.date).getTime() : 0;
+      const dateB = b.date && b.date !== 'N/A' ? new Date(b.date).getTime() : 0;
+      return sortOrder === 'asc' ? dateA - dateB : dateB - dateA;
+    });
+
+    // 6. Compute Category Breakdowns & Summary strictly from active filtered transactions (0 if empty, no fallback)
     const incomeMap: Record<string, number> = {};
     const expensesMap: Record<string, number> = {};
 
-    lines.forEach((l) => {
-      const category = l.account?.accountName || 'Rental Revenue';
-      const type = l.account?.type || 'Revenue';
-      const amount = l.credit - l.debit;
-
-      if (type === 'Revenue') {
-        incomeMap[category] = (incomeMap[category] || 0) + amount;
-      } else if (type === 'Expense') {
-        const expAmount = l.debit - l.credit;
-        expensesMap[category] = (expensesMap[category] || 0) + expAmount;
+    transactions.forEach((t) => {
+      const amt = Number(t.amount || 0);
+      const cat = t.category || (t.type === 'Income' ? 'Rental Revenue' : 'Property Maintenance & Repairs');
+      if (t.type === 'Income') {
+        incomeMap[cat] = Number(((incomeMap[cat] || 0) + amt).toFixed(2));
+      } else if (t.type === 'Expense') {
+        expensesMap[cat] = Number(((expensesMap[cat] || 0) + amt).toFixed(2));
       }
-    });
-
-    const transactions: any[] = [];
-
-    if (Object.keys(incomeMap).length === 0 && Object.keys(expensesMap).length === 0) {
-      const [payments, invoices, workOrders, serviceRequests] = await Promise.all([
-        prisma.rentPayment.findMany({
-          where: {
-            ...propertyFilter,
-            ...(query.unitId ? { tenant: { unitId: query.unitId } } : {}),
-            ...(query.tenantId ? { tenantId: query.tenantId } : {}),
-            status: 'Paid',
-            ...(startDate || endDate
-              ? {
-                paidDate: {
-                  ...(startDate ? { gte: startDate } : {}),
-                  ...(endDate ? { lte: endDate } : {}),
-                },
-              }
-              : {}),
-          },
-          include: { property: true, tenant: true, unit: true },
-        }),
-        prisma.invoice.findMany({
-          where: {
-            ...propertyFilter,
-            ...(query.unitId ? { tenant: { unitId: query.unitId } } : {}),
-            ...(query.tenantId ? { tenantId: query.tenantId } : {}),
-            status: { in: ['Paid', 'Partially Paid'] },
-          },
-        }),
-        prisma.workOrder.findMany({
-          where: propertyFilter,
-          include: { property: true },
-        }),
-        prisma.serviceRequest.findMany({
-          where: propertyFilter,
-        }),
-      ]);
-
-      // 1. Process Real Paid Rent Payments as Income Transactions
-      let rentalRevenue = 0;
-      const seenPaymentKeys = new Set<string>();
-
-      payments.forEach((p) => {
-        const amt = Number(p.amount || 0);
-        if (amt > 0) {
-          rentalRevenue += amt;
-          const dateStr = p.paidDate ? p.paidDate.toISOString().split('T')[0] : (p.dueDate ? p.dueDate.toISOString().split('T')[0] : 'N/A');
-          const dedupKey = `${p.tenantId || ''}_${amt}_${dateStr}`;
-          seenPaymentKeys.add(dedupKey);
-
-          transactions.push({
-            id: p.id,
-            date: dateStr,
-            description: `Rent payment - ${p.tenant ? `${p.tenant.firstName || ''} ${p.tenant.lastName || ''}`.trim() : 'Tenant'}`,
-            propertyId: p.propertyId,
-            unitId: p.unitId,
-            tenantId: p.tenantId,
-            tenantName: p.tenant ? `${p.tenant.firstName || ''} ${p.tenant.lastName || ''}`.trim() : '',
-            propertyName: p.property?.name || 'Property',
-            unitNumber: p.unit?.unitNumber ? (p.unit.unitNumber.toString().trim().toLowerCase().startsWith('unit') ? p.unit.unitNumber.toString().trim() : `Unit ${p.unit.unitNumber.toString().trim()}`) : (p.unitId || ''),
-            category: 'Rental Revenue',
-            type: 'Income',
-            amount: amt,
-          });
-        }
-      });
-
-      // Include any paid invoices that were not already captured by payments
-      invoices.forEach((inv) => {
-        const amt = Number(inv.paidAmount > 0 ? inv.paidAmount : inv.amount || 0);
-        const dateStr = inv.dueDate ? (inv.dueDate.includes('T') ? inv.dueDate.split('T')[0] : inv.dueDate) : (inv.createdAt ? inv.createdAt.toISOString().split('T')[0] : 'N/A');
-        const dedupKey = `${inv.tenantId || ''}_${amt}_${dateStr}`;
-
-        if (amt > 0 && !seenPaymentKeys.has(dedupKey)) {
-          rentalRevenue += amt;
-          seenPaymentKeys.add(dedupKey);
-          transactions.push({
-            id: inv.id,
-            date: dateStr,
-            description: `Rent payment - ${inv.tenantName || 'Tenant'}`,
-            propertyId: inv.propertyId,
-            unitId: (inv as any).unitId || '',
-            tenantId: inv.tenantId,
-            tenantName: inv.tenantName || '',
-            propertyName: inv.propertyName || 'Property',
-            unitNumber: inv.unitNumber ? (inv.unitNumber.toString().trim().toLowerCase().startsWith('unit') ? inv.unitNumber.toString().trim() : `Unit ${inv.unitNumber.toString().trim()}`) : '',
-            category: 'Rental Revenue',
-            type: 'Income',
-            amount: amt,
-          });
-        }
-      });
-
-      if (rentalRevenue > 0) {
-        incomeMap['Rental Revenue'] = rentalRevenue;
-      }
-
-      // 2. Process Service Requests & Work Orders as Expense Transactions
-      let totalMaintenance = 0;
-      serviceRequests.forEach((sr: any) => {
-        const cost = Number(sr.cost || sr.estimatedCost || 0);
-        if (cost > 0) {
-          totalMaintenance += cost;
-          transactions.push({
-            id: sr.id,
-            date: sr.createdAt ? sr.createdAt.toISOString().split('T')[0] : 'N/A',
-            description: sr.title || 'Property Maintenance',
-            propertyName: sr.propertyName || 'Property',
-            unitNumber: sr.unitNumber ? (sr.unitNumber.toString().trim().toLowerCase().startsWith('unit') ? sr.unitNumber.toString().trim() : `Unit ${sr.unitNumber.toString().trim()}`) : '',
-            category: 'Property Maintenance & Repairs',
-            type: 'Expense',
-            amount: cost,
-          });
-        }
-      });
-
-      workOrders.forEach((wo: any) => {
-        const cost = Number(wo.actualCost || wo.cost || wo.estimatedCost || 0);
-        if (cost > 0) {
-          totalMaintenance += cost;
-          transactions.push({
-            id: wo.id,
-            date: wo.createdAt ? wo.createdAt.toISOString().split('T')[0] : 'N/A',
-            description: wo.title || 'Work Order Repair',
-            propertyName: wo.property?.name || 'Property',
-            unitNumber: wo.unitNumber || '',
-            category: 'Property Maintenance & Repairs',
-            type: 'Expense',
-            amount: cost,
-          });
-        }
-      });
-
-      if (totalMaintenance > 0) {
-        expensesMap['Property Maintenance & Repairs'] = totalMaintenance;
-      }
-    }
-
-    // Sort transactions date descending
-    transactions.sort((a, b) => {
-      const dateA = a.date && a.date !== 'N/A' ? new Date(a.date).getTime() : 0;
-      const dateB = b.date && b.date !== 'N/A' ? new Date(b.date).getTime() : 0;
-      return dateB - dateA;
     });
 
     const income = Object.keys(incomeMap).map((k) => ({ name: k, amount: incomeMap[k] }));
     const expenses = Object.keys(expensesMap).map((k) => ({ name: k, amount: expensesMap[k] }));
 
-    const totalIncome = income.reduce((acc, curr) => acc + curr.amount, 0);
-    const totalExpenses = expenses.reduce((acc, curr) => acc + curr.amount, 0);
-    const netProfit = totalIncome - totalExpenses;
+    const totalIncome = Number(income.reduce((acc, curr) => acc + curr.amount, 0).toFixed(2));
+    const totalExpenses = Number(expenses.reduce((acc, curr) => acc + curr.amount, 0).toFixed(2));
+    const netProfit = Number((totalIncome - totalExpenses).toFixed(2));
 
     return {
       data: {
@@ -638,7 +893,7 @@ export class ReportService {
         page: 1,
         limit: transactions.length || 50,
         totalRecords: transactions.length,
-        totalPages: 1,
+        totalPages: transactions.length > 0 ? 1 : 0,
       },
     };
   }

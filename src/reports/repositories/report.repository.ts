@@ -7,12 +7,20 @@ export class ReportRepository {
     units: string[];
     leases: string[];
     tenants: string[];
+    invoices: string[];
+    payments: string[];
+    workOrders: string[];
+    serviceRequests: string[];
   }> {
     const result = {
       properties: [] as string[],
       units: [] as string[],
       leases: [] as string[],
       tenants: [] as string[],
+      invoices: [] as string[],
+      payments: [] as string[],
+      workOrders: [] as string[],
+      serviceRequests: [] as string[],
     };
     try {
       const rows: any[] = await prisma.$queryRawUnsafe(
@@ -20,13 +28,17 @@ export class ReportRepository {
         ...(companyId ? [companyId] : [])
       );
       for (const r of rows || []) {
-        const type = String(r.entityType || '').toLowerCase();
+        const type = String(r.entityType || '').toLowerCase().replace(/[\s_-]/g, '');
         const id = String(r.entityId || '');
         if (!id) continue;
         if (type === 'property') result.properties.push(id);
         else if (type === 'unit') result.units.push(id);
         else if (type === 'lease') result.leases.push(id);
         else if (type === 'tenant') result.tenants.push(id);
+        else if (type === 'invoice') result.invoices.push(id);
+        else if (type === 'payment' || type === 'rentpayment') result.payments.push(id);
+        else if (type === 'workorder') result.workOrders.push(id);
+        else if (type === 'servicerequest') result.serviceRequests.push(id);
       }
     } catch {
       // restore_bin table may not exist yet; ignore safely
