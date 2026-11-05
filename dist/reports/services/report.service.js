@@ -344,6 +344,8 @@ class ReportService {
                 database_1.default.rentPayment.findMany({
                     where: {
                         ...propertyFilter,
+                        ...(query.unitId ? { tenant: { unitId: query.unitId } } : {}),
+                        ...(query.tenantId ? { tenantId: query.tenantId } : {}),
                         status: 'Paid',
                         ...(startDate || endDate
                             ? {
@@ -359,6 +361,8 @@ class ReportService {
                 database_1.default.invoice.findMany({
                     where: {
                         ...propertyFilter,
+                        ...(query.unitId ? { tenant: { unitId: query.unitId } } : {}),
+                        ...(query.tenantId ? { tenantId: query.tenantId } : {}),
                         status: { in: ['Paid', 'Partially Paid'] },
                     },
                 }),
@@ -384,6 +388,10 @@ class ReportService {
                         id: p.id,
                         date: dateStr,
                         description: `Rent payment - ${p.tenant ? `${p.tenant.firstName || ''} ${p.tenant.lastName || ''}`.trim() : 'Tenant'}`,
+                        propertyId: p.propertyId,
+                        unitId: p.unitId,
+                        tenantId: p.tenantId,
+                        tenantName: p.tenant ? `${p.tenant.firstName || ''} ${p.tenant.lastName || ''}`.trim() : '',
                         propertyName: p.property?.name || 'Property',
                         unitNumber: p.unit?.unitNumber ? (p.unit.unitNumber.toString().trim().toLowerCase().startsWith('unit') ? p.unit.unitNumber.toString().trim() : `Unit ${p.unit.unitNumber.toString().trim()}`) : (p.unitId || ''),
                         category: 'Rental Revenue',
@@ -404,6 +412,10 @@ class ReportService {
                         id: inv.id,
                         date: dateStr,
                         description: `Rent payment - ${inv.tenantName || 'Tenant'}`,
+                        propertyId: inv.propertyId,
+                        unitId: inv.unitId || '',
+                        tenantId: inv.tenantId,
+                        tenantName: inv.tenantName || '',
                         propertyName: inv.propertyName || 'Property',
                         unitNumber: inv.unitNumber ? (inv.unitNumber.toString().trim().toLowerCase().startsWith('unit') ? inv.unitNumber.toString().trim() : `Unit ${inv.unitNumber.toString().trim()}`) : '',
                         category: 'Rental Revenue',
