@@ -99,7 +99,7 @@ class ReportRepository {
             orderBy = { securityDeposit: sortOrder };
         if (sortBy === 'unitNumber')
             orderBy = { unitNumber: sortOrder };
-        const [units, totalRecords, summaryUnits] = await Promise.all([
+        const [rawUnits, totalRecords, summaryUnits] = await Promise.all([
             database_1.default.unit.findMany({
                 where: whereClause,
                 include: {
@@ -107,7 +107,6 @@ class ReportRepository {
                     tenants: true,
                     leases: {
                         where: { status: 'Active' },
-                        include: { tenant: true },
                         orderBy: { startDate: 'desc' },
                         take: 1,
                     },
@@ -115,6 +114,28 @@ class ReportRepository {
                 orderBy,
                 skip,
                 take: limit,
+            }).catch(async () => {
+                const fallbackUnits = await database_1.default.unit.findMany({
+                    where: whereClause,
+                    include: {
+                        tenants: true,
+                        leases: {
+                            where: { status: 'Active' },
+                            orderBy: { startDate: 'desc' },
+                            take: 1,
+                        },
+                    },
+                    orderBy,
+                    skip,
+                    take: limit,
+                });
+                const propIds = Array.from(new Set(fallbackUnits.map((u) => u.propertyId).filter(Boolean)));
+                const props = propIds.length ? await database_1.default.property.findMany({ where: { id: { in: propIds } } }) : [];
+                const propMap = new Map(props.map((p) => [p.id, p]));
+                return fallbackUnits.map((u) => ({
+                    ...u,
+                    property: propMap.get(u.propertyId) || null,
+                }));
             }),
             database_1.default.unit.count({ where: whereClause }),
             database_1.default.unit.findMany({
@@ -128,6 +149,21 @@ class ReportRepository {
                 },
             }),
         ]);
+        const leaseTenantIds = Array.from(new Set(rawUnits
+            .flatMap((u) => u.leases || [])
+            .map((l) => l.tenantId)
+            .filter(Boolean)));
+        const leaseTenants = leaseTenantIds.length
+            ? await database_1.default.tenant.findMany({ where: { id: { in: leaseTenantIds } } })
+            : [];
+        const leaseTenantMap = new Map(leaseTenants.map((t) => [t.id, t]));
+        const units = rawUnits.map((u) => ({
+            ...u,
+            leases: (u.leases || []).map((l) => ({
+                ...l,
+                tenant: (l.tenantId && leaseTenantMap.get(l.tenantId)) || null,
+            })),
+        }));
         let totalMonthlyRent = 0;
         let totalSecurityDeposits = 0;
         let occupiedCount = 0;

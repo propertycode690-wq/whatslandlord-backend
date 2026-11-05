@@ -110,7 +110,7 @@ export class ReportRepository {
     if (sortBy === 'securityDeposit') orderBy = { securityDeposit: sortOrder };
     if (sortBy === 'unitNumber') orderBy = { unitNumber: sortOrder };
 
-    const [units, totalRecords, summaryUnits] = await Promise.all([
+    const [rawUnits, totalRecords, summaryUnits] = await Promise.all([
       prisma.unit.findMany({
         where: whereClause,
         include: {
@@ -118,7 +118,6 @@ export class ReportRepository {
           tenants: true,
           leases: {
             where: { status: 'Active' },
-            include: { tenant: true },
             orderBy: { startDate: 'desc' },
             take: 1,
           },
@@ -126,11 +125,34 @@ export class ReportRepository {
         orderBy,
         skip,
         take: limit,
+      }).catch(async () => {
+        const fallbackUnits = await prisma.unit.findMany({
+          where: whereClause,
+          include: {
+            tenants: true,
+            leases: {
+              where: { status: 'Active' },
+              orderBy: { startDate: 'desc' },
+              take: 1,
+            },
+          },
+          orderBy,
+          skip,
+          take: limit,
+        });
+        const propIds = Array.from(new Set(fallbackUnits.map((u) => u.propertyId).filter(Boolean)));
+        const props = propIds.length ? await prisma.property.findMany({ where: { id: { in: propIds } } }) : [];
+        const propMap = new Map(props.map((p) => [p.id, p]));
+        return fallbackUnits.map((u) => ({
+          ...u,
+          property: propMap.get(u.propertyId) || null,
+        }));
       }),
       prisma.unit.count({ where: whereClause }),
       prisma.unit.findMany({
         where: whereClause,
         include: {
+          tenants: true,
           leases: {
             where: { status: 'Active' },
             orderBy: { startDate: 'desc' },
@@ -140,14 +162,70 @@ export class ReportRepository {
       }),
     ]);
 
+    const allLeaseTenantIds = Array.from(
+      new Set(
+        [...rawUnits, ...summaryUnits]
+          .flatMap((u: any) => u.leases || [])
+          .map((l: any) => l.tenantId)
+          .filter(Boolean)
+      )
+    ) as string[];
+
+    const leaseTenants = allLeaseTenantIds.length
+      ? await prisma.tenant.findMany({
+          where: {
+            id: { in: allLeaseTenantIds },
+            status: { notIn: ['Inactive'] as any },
+          },
+        })
+      : [];
+    const leaseTenantMap = new Map(leaseTenants.map((t) => [t.id, t]));
+
+    // Auto-clean orphaned active leases whose tenant was deleted
+    const orphanedLeaseIds = [...rawUnits, ...summaryUnits]
+      .flatMap((u: any) => u.leases || [])
+      .filter((l: any) => !l.tenantId || !leaseTenantMap.has(l.tenantId))
+      .map((l: any) => l.id);
+
+    if (orphanedLeaseIds.length > 0) {
+      await prisma.lease
+        .updateMany({
+          where: { id: { in: Array.from(new Set(orphanedLeaseIds)) } },
+          data: { status: 'Ended' },
+        })
+        .catch(() => {});
+    }
+
+    const units = rawUnits.map((u: any) => {
+      const validTenants = (u.tenants || []).filter((t: any) => t && t.status !== 'Inactive');
+      const hadOrphanLease = (u.leases || []).some((l: any) => !l.tenantId || !leaseTenantMap.has(l.tenantId));
+      const validLeases = (u.leases || [])
+        .filter((l: any) => l.tenantId && leaseTenantMap.has(l.tenantId))
+        .map((l: any) => ({
+          ...l,
+          tenant: leaseTenantMap.get(l.tenantId) || null,
+        }));
+
+      return {
+        ...u,
+        status: validLeases.length === 0 && validTenants.length === 0 && hadOrphanLease ? 'Vacant' : u.status,
+        tenants: validTenants,
+        leases: validLeases,
+      };
+    });
+
     let totalMonthlyRent = 0;
     let totalSecurityDeposits = 0;
     let occupiedCount = 0;
     let vacantCount = 0;
 
-    summaryUnits.forEach((u) => {
-      const activeLease = u.leases && u.leases.length > 0 ? u.leases[0] : null;
-      const isOccupied = Boolean(activeLease) || u.status === 'Occupied';
+    summaryUnits.forEach((u: any) => {
+      const validTenants = (u.tenants || []).filter((t: any) => t && t.status !== 'Inactive');
+      const hadOrphanLease = (u.leases || []).some((l: any) => !l.tenantId || !leaseTenantMap.has(l.tenantId));
+      const validLeases = (u.leases || []).filter((l: any) => l.tenantId && leaseTenantMap.has(l.tenantId));
+      const activeLease = validLeases.length > 0 ? validLeases[0] : null;
+      const effectiveStatus = !activeLease && validTenants.length === 0 && hadOrphanLease ? 'Vacant' : u.status;
+      const isOccupied = Boolean(activeLease) || validTenants.length > 0 || effectiveStatus === 'Occupied';
       if (isOccupied) {
         occupiedCount++;
       } else {

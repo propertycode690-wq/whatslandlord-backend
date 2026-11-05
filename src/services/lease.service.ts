@@ -19,7 +19,7 @@ export class LeaseService {
         },
       });
     } catch (err: any) {
-      if (err?.message?.includes('Field unit is required') || err?.message?.includes('Inconsistent query result')) {
+      if (err?.message?.includes('Field') || err?.message?.includes('Inconsistent query result')) {
         const rawLeases = await prisma.lease.findMany({
           where: {
             property: {
@@ -27,18 +27,23 @@ export class LeaseService {
             },
             ...(companyId ? { companyId } : {}),
           },
-          include: {
-            tenant: true,
-            property: true,
-          },
         });
-        const unitIds = rawLeases.map((l) => l.unitId).filter(Boolean) as string[];
-        const existingUnits = await prisma.unit.findMany({
-          where: { id: { in: unitIds } },
-        });
+        const tenantIds = Array.from(new Set(rawLeases.map((l) => l.tenantId).filter(Boolean))) as string[];
+        const propertyIds = Array.from(new Set(rawLeases.map((l) => l.propertyId).filter(Boolean))) as string[];
+        const unitIds = Array.from(new Set(rawLeases.map((l) => l.unitId).filter(Boolean))) as string[];
+
+        const [existingTenants, existingProperties, existingUnits] = await Promise.all([
+          tenantIds.length ? prisma.tenant.findMany({ where: { id: { in: tenantIds } } }) : [],
+          propertyIds.length ? prisma.property.findMany({ where: { id: { in: propertyIds } } }) : [],
+          unitIds.length ? prisma.unit.findMany({ where: { id: { in: unitIds } } }) : [],
+        ]);
+        const tenantMap = new Map(existingTenants.map((t) => [t.id, t]));
+        const propertyMap = new Map(existingProperties.map((p) => [p.id, p]));
         const unitMap = new Map(existingUnits.map((u) => [u.id, u]));
         return rawLeases.map((l) => ({
           ...l,
+          tenant: (l.tenantId && tenantMap.get(l.tenantId)) || null,
+          property: (l.propertyId && propertyMap.get(l.propertyId)) || null,
           unit: (l.unitId && unitMap.get(l.unitId)) || null,
         }));
       }

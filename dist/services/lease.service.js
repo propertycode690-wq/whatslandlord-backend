@@ -25,7 +25,7 @@ class LeaseService {
             });
         }
         catch (err) {
-            if (err?.message?.includes('Field unit is required') || err?.message?.includes('Inconsistent query result')) {
+            if (err?.message?.includes('Field') || err?.message?.includes('Inconsistent query result')) {
                 const rawLeases = await database_1.default.lease.findMany({
                     where: {
                         property: {
@@ -33,18 +33,22 @@ class LeaseService {
                         },
                         ...(companyId ? { companyId } : {}),
                     },
-                    include: {
-                        tenant: true,
-                        property: true,
-                    },
                 });
-                const unitIds = rawLeases.map((l) => l.unitId).filter(Boolean);
-                const existingUnits = await database_1.default.unit.findMany({
-                    where: { id: { in: unitIds } },
-                });
+                const tenantIds = Array.from(new Set(rawLeases.map((l) => l.tenantId).filter(Boolean)));
+                const propertyIds = Array.from(new Set(rawLeases.map((l) => l.propertyId).filter(Boolean)));
+                const unitIds = Array.from(new Set(rawLeases.map((l) => l.unitId).filter(Boolean)));
+                const [existingTenants, existingProperties, existingUnits] = await Promise.all([
+                    tenantIds.length ? database_1.default.tenant.findMany({ where: { id: { in: tenantIds } } }) : [],
+                    propertyIds.length ? database_1.default.property.findMany({ where: { id: { in: propertyIds } } }) : [],
+                    unitIds.length ? database_1.default.unit.findMany({ where: { id: { in: unitIds } } }) : [],
+                ]);
+                const tenantMap = new Map(existingTenants.map((t) => [t.id, t]));
+                const propertyMap = new Map(existingProperties.map((p) => [p.id, p]));
                 const unitMap = new Map(existingUnits.map((u) => [u.id, u]));
                 return rawLeases.map((l) => ({
                     ...l,
+                    tenant: (l.tenantId && tenantMap.get(l.tenantId)) || null,
+                    property: (l.propertyId && propertyMap.get(l.propertyId)) || null,
                     unit: (l.unitId && unitMap.get(l.unitId)) || null,
                 }));
             }
