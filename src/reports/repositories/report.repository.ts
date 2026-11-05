@@ -1,6 +1,51 @@
 import prisma from '../../config/database';
 
 export class ReportRepository {
+  // Helper: Fetch soft-deleted entity IDs from restore_bin so soft-deleted records are never counted
+  async getSoftDeletedIds(companyId?: string): Promise<{
+    properties: string[];
+    units: string[];
+    leases: string[];
+    tenants: string[];
+    invoices: string[];
+    payments: string[];
+    workOrders: string[];
+    serviceRequests: string[];
+  }> {
+    const result = {
+      properties: [] as string[],
+      units: [] as string[],
+      leases: [] as string[],
+      tenants: [] as string[],
+      invoices: [] as string[],
+      payments: [] as string[],
+      workOrders: [] as string[],
+      serviceRequests: [] as string[],
+    };
+    try {
+      const rows: any[] = await prisma.$queryRawUnsafe(
+        `SELECT entityType, entityId FROM restore_bin ${companyId ? 'WHERE companyId = ? OR companyId IS NULL' : ''}`,
+        ...(companyId ? [companyId] : [])
+      );
+      for (const r of rows || []) {
+        const type = String(r.entityType || '').toLowerCase().replace(/[\s_-]/g, '');
+        const id = String(r.entityId || '');
+        if (!id) continue;
+        if (type === 'property') result.properties.push(id);
+        else if (type === 'unit') result.units.push(id);
+        else if (type === 'lease') result.leases.push(id);
+        else if (type === 'tenant') result.tenants.push(id);
+        else if (type === 'invoice') result.invoices.push(id);
+        else if (type === 'payment' || type === 'rentpayment') result.payments.push(id);
+        else if (type === 'workorder') result.workOrders.push(id);
+        else if (type === 'servicerequest') result.serviceRequests.push(id);
+      }
+    } catch {
+      // restore_bin table may not exist yet; ignore safely
+    }
+    return result;
+  }
+
   // 1. Rent Roll Report Data
   async getRentRollData(params: {
     companyId?: string;
@@ -18,29 +63,61 @@ export class ReportRepository {
     sortOrder?: 'asc' | 'desc';
   }) {
     const { propertyIds, propertyId, unitId, tenantId, leaseStatus, startDate, endDate, search, page, limit, sortBy, sortOrder = 'asc' } = params;
-    const activePropertyIds = propertyId ? [propertyId] : propertyIds;
+    const softDeleted = await this.getSoftDeletedIds(params.companyId);
+
+    const activePropertyIds = (propertyId ? propertyIds.filter((id) => id === propertyId) : propertyIds).filter(
+      (id) => !softDeleted.properties.includes(id)
+    );
 
     if (activePropertyIds.length === 0) {
-      return { units: [], totalRecords: 0, summary: { totalMonthlyRent: 0, totalSecurityDeposits: 0, occupiedCount: 0, vacantCount: 0, totalUnits: 0 } };
+      return {
+        units: [],
+        totalRecords: 0,
+        summary: {
+          totalMonthlyRent: 0,
+          totalPotentialRent: 0,
+          totalVacancyLoss: 0,
+          totalSecurityDeposits: 0,
+          occupiedCount: 0,
+          vacantCount: 0,
+          totalUnits: 0,
+        },
+      };
     }
 
-    // 1. Build whereClause for filtered list of units
+    // 1. Build whereClause for filtered list of active, non-deleted units
     const whereClause: any = {
       propertyId: { in: activePropertyIds },
+      ...(softDeleted.units.length > 0 ? { id: { notIn: softDeleted.units } } : {}),
       property: {
-        status: { notIn: ['Inactive', 'Deleted'] },
+        status: { notIn: ['Inactive', 'Deleted', 'Draft'] },
         ...(params.companyId ? { companyId: params.companyId } : {}),
       },
     };
 
     if (unitId) {
+      if (softDeleted.units.includes(unitId)) {
+        return {
+          units: [],
+          totalRecords: 0,
+          summary: {
+            totalMonthlyRent: 0,
+            totalPotentialRent: 0,
+            totalVacancyLoss: 0,
+            totalSecurityDeposits: 0,
+            occupiedCount: 0,
+            vacantCount: 0,
+            totalUnits: 0,
+          },
+        };
+      }
       whereClause.id = unitId;
     }
 
     if (tenantId) {
       whereClause.OR = [
-        { tenants: { some: { id: tenantId } } },
-        { leases: { some: { tenantId } } },
+        { tenants: { some: { id: tenantId, status: { not: 'Inactive' } } } },
+        { leases: { some: { tenantId, status: { notIn: ['Terminated', 'Cancelled'] } } } },
       ];
     }
 
@@ -48,18 +125,54 @@ export class ReportRepository {
       const ls = leaseStatus.toLowerCase().trim();
       if (ls === 'active' || ls === 'occupied') {
         whereClause.OR = [
-          { leases: { some: { status: 'Active' } } },
-          { status: 'Occupied' },
+          {
+            leases: {
+              some: {
+                status: 'Active',
+                ...(softDeleted.leases.length > 0 ? { id: { notIn: softDeleted.leases } } : {}),
+              },
+            },
+          },
+          {
+            status: 'Occupied',
+            tenants: {
+              some: {
+                status: 'Active',
+                ...(softDeleted.tenants.length > 0 ? { id: { notIn: softDeleted.tenants } } : {}),
+              },
+            },
+          },
         ];
       } else if (ls === 'vacant') {
         whereClause.AND = [
-          { leases: { none: { status: 'Active' } } },
-          { status: { not: 'Occupied' } },
+          {
+            leases: {
+              none: {
+                status: 'Active',
+                ...(softDeleted.leases.length > 0 ? { id: { notIn: softDeleted.leases } } : {}),
+              },
+            },
+          },
+          {
+            OR: [
+              { status: { not: 'Occupied' } },
+              { tenants: { none: { status: 'Active' } } },
+            ],
+          },
         ];
-      } else if (ls === 'pending' || ls === 'pending_move_in') {
-        whereClause.leases = { some: { status: 'Pending_Move_In' } };
-      } else if (ls === 'ended' || ls === 'expired' || ls === 'terminated') {
-        whereClause.leases = { some: { status: { in: ['Ended', 'Expired', 'Terminated'] } } };
+      } else if (ls === 'pending' || ls === 'pending_move_in' || ls === 'pending move in' || ls === 'reserved') {
+        whereClause.OR = [
+          { leases: { some: { status: 'Pending_Move_In' } } },
+          { status: 'Reserved' },
+        ];
+      } else if (ls === 'ended' || ls === 'expired' || ls === 'terminated' || ls === 'draft') {
+        const targetStatus = leaseStatus.charAt(0).toUpperCase() + leaseStatus.slice(1).toLowerCase();
+        whereClause.leases = {
+          some: {
+            status: targetStatus as any,
+            ...(softDeleted.leases.length > 0 ? { id: { notIn: softDeleted.leases } } : {}),
+          },
+        };
       } else if (ls !== 'all' && ls !== 'all statuses' && ls !== 'all_statuses') {
         whereClause.OR = [
           { leases: { some: { status: leaseStatus as any } } },
@@ -89,8 +202,8 @@ export class ReportRepository {
       const searchConditions = [
         { unitNumber: { contains: search } },
         { property: { name: { contains: search } } },
-        { tenants: { some: { OR: [{ firstName: { contains: search } }, { lastName: { contains: search } }] } } },
-        { leases: { some: { tenant: { OR: [{ firstName: { contains: search } }, { lastName: { contains: search } }] } } } },
+        { tenants: { some: { status: { not: 'Inactive' }, OR: [{ firstName: { contains: search } }, { lastName: { contains: search } }] } } },
+        { leases: { some: { tenant: { status: { not: 'Inactive' }, OR: [{ firstName: { contains: search } }, { lastName: { contains: search } }] } } } },
       ];
 
       if (whereClause.AND) {
@@ -106,20 +219,30 @@ export class ReportRepository {
       { property: { name: 'asc' } },
       { unitNumber: 'asc' },
     ];
-    if (sortBy === 'rentAmount') orderBy = { rentAmount: sortOrder };
+    if (sortBy === 'rentAmount' || sortBy === 'monthlyRent' || sortBy === 'potentialRent') orderBy = { rentAmount: sortOrder };
     if (sortBy === 'securityDeposit') orderBy = { securityDeposit: sortOrder };
     if (sortBy === 'unitNumber') orderBy = { unitNumber: sortOrder };
+
+    const leaseWhereFilter: any = {
+      ...(params.companyId ? { companyId: params.companyId } : {}),
+      ...(softDeleted.leases.length > 0 ? { id: { notIn: softDeleted.leases } } : {}),
+    };
+
+    const tenantCompanyFilter: any = {
+      ...(params.companyId ? { companyId: params.companyId } : {}),
+    };
 
     const [rawUnits, totalRecords, summaryUnits] = await Promise.all([
       prisma.unit.findMany({
         where: whereClause,
         include: {
           property: true,
-          tenants: true,
+          tenants: {
+            where: tenantCompanyFilter,
+          },
           leases: {
-            where: { status: 'Active' },
+            where: leaseWhereFilter,
             orderBy: { startDate: 'desc' },
-            take: 1,
           },
         },
         orderBy,
@@ -129,11 +252,12 @@ export class ReportRepository {
         const fallbackUnits = await prisma.unit.findMany({
           where: whereClause,
           include: {
-            tenants: true,
+            tenants: {
+              where: tenantCompanyFilter,
+            },
             leases: {
-              where: { status: 'Active' },
+              where: leaseWhereFilter,
               orderBy: { startDate: 'desc' },
-              take: 1,
             },
           },
           orderBy,
@@ -152,11 +276,12 @@ export class ReportRepository {
       prisma.unit.findMany({
         where: whereClause,
         include: {
-          tenants: true,
+          tenants: {
+            where: tenantCompanyFilter,
+          },
           leases: {
-            where: { status: 'Active' },
+            where: leaseWhereFilter,
             orderBy: { startDate: 'desc' },
-            take: 1,
           },
         },
       }),
@@ -167,7 +292,7 @@ export class ReportRepository {
         [...rawUnits, ...summaryUnits]
           .flatMap((u: any) => u.leases || [])
           .map((l: any) => l.tenantId)
-          .filter(Boolean)
+          .filter((id: any) => Boolean(id) && !softDeleted.tenants.includes(String(id)))
       )
     ) as string[];
 
@@ -175,16 +300,17 @@ export class ReportRepository {
       ? await prisma.tenant.findMany({
           where: {
             id: { in: allLeaseTenantIds },
+            ...(params.companyId ? { companyId: params.companyId } : {}),
             status: { notIn: ['Inactive'] as any },
           },
         })
       : [];
     const leaseTenantMap = new Map(leaseTenants.map((t) => [t.id, t]));
 
-    // Auto-clean orphaned active leases whose tenant was deleted
+    // Auto-clean orphaned active leases whose tenant was deleted or soft-deleted
     const orphanedLeaseIds = [...rawUnits, ...summaryUnits]
       .flatMap((u: any) => u.leases || [])
-      .filter((l: any) => !l.tenantId || !leaseTenantMap.has(l.tenantId))
+      .filter((l: any) => l.status === 'Active' && (!l.tenantId || !leaseTenantMap.has(l.tenantId)))
       .map((l: any) => l.id);
 
     if (orphanedLeaseIds.length > 0) {
@@ -196,45 +322,82 @@ export class ReportRepository {
         .catch(() => {});
     }
 
+    const ghostOccupiedUnitIds: string[] = [];
+
     const units = rawUnits.map((u: any) => {
-      const validTenants = (u.tenants || []).filter((t: any) => t && t.status !== 'Inactive');
-      const hadOrphanLease = (u.leases || []).some((l: any) => !l.tenantId || !leaseTenantMap.has(l.tenantId));
+      const validTenants = (u.tenants || []).filter(
+        (t: any) => t && t.status === 'Active' && !softDeleted.tenants.includes(t.id)
+      );
       const validLeases = (u.leases || [])
-        .filter((l: any) => l.tenantId && leaseTenantMap.has(l.tenantId))
+        .filter((l: any) => l.tenantId && leaseTenantMap.has(l.tenantId) && !softDeleted.leases.includes(l.id))
         .map((l: any) => ({
           ...l,
           tenant: leaseTenantMap.get(l.tenantId) || null,
         }));
 
+      const activeLease = validLeases.find((l: any) => l.status === 'Active') || null;
+      const hasRealOccupant = Boolean(activeLease) || (u.status === 'Occupied' && validTenants.length > 0);
+
+      if (u.status === 'Occupied' && !hasRealOccupant) {
+        ghostOccupiedUnitIds.push(u.id);
+      }
+
       return {
         ...u,
-        status: validLeases.length === 0 && validTenants.length === 0 && hadOrphanLease ? 'Vacant' : u.status,
+        status: hasRealOccupant ? 'Occupied' : (u.status === 'Occupied' ? 'Vacant' : u.status),
         tenants: validTenants,
         leases: validLeases,
       };
     });
 
+    if (ghostOccupiedUnitIds.length > 0) {
+      await prisma.unit
+        .updateMany({
+          where: { id: { in: Array.from(new Set(ghostOccupiedUnitIds)) } },
+          data: { status: 'Vacant' },
+        })
+        .catch(() => {});
+    }
+
     let totalMonthlyRent = 0;
+    let totalPotentialRent = 0;
+    let totalVacancyLoss = 0;
     let totalSecurityDeposits = 0;
     let occupiedCount = 0;
     let vacantCount = 0;
 
     summaryUnits.forEach((u: any) => {
-      const validTenants = (u.tenants || []).filter((t: any) => t && t.status !== 'Inactive');
-      const hadOrphanLease = (u.leases || []).some((l: any) => !l.tenantId || !leaseTenantMap.has(l.tenantId));
-      const validLeases = (u.leases || []).filter((l: any) => l.tenantId && leaseTenantMap.has(l.tenantId));
-      const activeLease = validLeases.length > 0 ? validLeases[0] : null;
-      const effectiveStatus = !activeLease && validTenants.length === 0 && hadOrphanLease ? 'Vacant' : u.status;
-      const isOccupied = Boolean(activeLease) || validTenants.length > 0 || effectiveStatus === 'Occupied';
+      const validTenants = (u.tenants || []).filter(
+        (t: any) => t && t.status === 'Active' && !softDeleted.tenants.includes(t.id)
+      );
+      const validLeases = (u.leases || []).filter(
+        (l: any) => l.tenantId && leaseTenantMap.has(l.tenantId) && !softDeleted.leases.includes(l.id)
+      );
+      const activeLease = validLeases.find((l: any) => l.status === 'Active') || null;
+
+      // Strict Occupancy Check: Unit is Occupied ONLY if it has a valid Active Lease OR (unit is Occupied AND has an Active non-deleted Tenant)
+      const isOccupied = Boolean(activeLease) || (u.status === 'Occupied' && validTenants.length > 0);
+
+      const unitMarketRent = Number(u.rentAmount || 0);
+      const activeRent = activeLease ? Number(activeLease.rentAmount ?? unitMarketRent) : unitMarketRent;
+
+      const actualMonthlyRent = isOccupied ? activeRent : 0;
+      const potentialRent = isOccupied ? activeRent : unitMarketRent;
+      const vacancyLoss = isOccupied ? 0 : unitMarketRent;
+      const depositHeld = isOccupied
+        ? Number(activeLease ? (activeLease.depositAmount ?? u.securityDeposit ?? 0) : (u.securityDeposit ?? 0))
+        : 0;
+
       if (isOccupied) {
         occupiedCount++;
       } else {
         vacantCount++;
       }
-      const rent = activeLease ? Number(activeLease.rentAmount || u.rentAmount || 0) : Number(u.rentAmount || 0);
-      const deposit = activeLease ? Number(activeLease.depositAmount || u.securityDeposit || 0) : Number(u.securityDeposit || 0);
-      totalMonthlyRent += rent;
-      totalSecurityDeposits += deposit;
+
+      totalMonthlyRent += actualMonthlyRent;
+      totalPotentialRent += potentialRent;
+      totalVacancyLoss += vacancyLoss;
+      totalSecurityDeposits += depositHeld;
     });
 
     return {
@@ -242,6 +405,8 @@ export class ReportRepository {
       totalRecords,
       summary: {
         totalMonthlyRent,
+        totalPotentialRent,
+        totalVacancyLoss,
         totalSecurityDeposits,
         occupiedCount,
         vacantCount,
