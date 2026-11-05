@@ -109,20 +109,39 @@ class VendorController {
     }
     async update(req, res, next) {
         try {
-            const { companyName, contactName, email, phone, serviceType, rating } = req.body;
+            const companyName = req.body.companyName || req.body.name;
+            const contactName = req.body.contactName || req.body.primaryContact || req.body.contact;
+            const serviceType = req.body.serviceType || req.body.category;
+            const { email, phone, rating, status } = req.body;
             const id = req.params.id;
             const companyId = req.user?.companyId;
-            if (companyId) {
-                const check = await database_1.default.vendor.findFirst({
-                    where: { id, companyId },
-                });
-                if (!check)
-                    throw new Error('Vendor not found.');
-            }
+            const check = await database_1.default.vendor.findFirst({
+                where: companyId ? { id, companyId } : { id },
+            });
+            if (!check)
+                throw new appError_1.AppError('Vendor not found.', 404);
             const vendor = await database_1.default.vendor.update({
                 where: { id },
-                data: { companyName, contactName, email, phone, serviceType, rating },
+                data: {
+                    ...(companyName ? { companyName } : {}),
+                    ...(contactName ? { contactName } : {}),
+                    ...(email ? { email: email.trim().toLowerCase() } : {}),
+                    ...(phone !== undefined ? { phone } : {}),
+                    ...(serviceType ? { serviceType } : {}),
+                    ...(rating !== undefined ? { rating: Number(rating) } : {}),
+                },
             });
+            // Update matching user if email/contact changed
+            if (check.email) {
+                await database_1.default.user.updateMany({
+                    where: { email: check.email, ...(companyId ? { companyId } : {}) },
+                    data: {
+                        ...(email ? { email: email.trim().toLowerCase() } : {}),
+                        ...(phone !== undefined ? { phone } : {}),
+                        ...(status ? { status } : {}),
+                    },
+                }).catch(() => { });
+            }
             return (0, apiResponse_1.sendSuccess)({ res, data: vendor });
         }
         catch (error) {

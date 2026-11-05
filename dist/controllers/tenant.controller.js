@@ -35,7 +35,7 @@ class TenantController {
     }
     async create(req, res, next) {
         try {
-            const { firstName, lastName, email, phone, unitId, status, password, dob, nationality, idType, idNumber, emergencyName, emergencyRelationship, emergencyPhone, employer, position, monthlyIncome, employmentStatus, currentAddress, } = req.body;
+            const { firstName, lastName, email, phone, unitId, status, password, dob, nationality, idType, idNumber, emergencyName, emergencyRelationship, emergencyPhone, employer, position, monthlyIncome, employmentStatus, currentAddress, preferredName, altPhone, moveInDate, invoiceStartDate, gender, previousBalance, openingBalance, } = req.body;
             const companyId = await (0, companyHelper_js_1.getManagerCompanyId)(req, req.body.companyId || req.user?.companyId);
             const file = req.file;
             let imageUrl = null;
@@ -78,6 +78,13 @@ class TenantController {
                             monthlyIncome: monthlyIncome ? Number(monthlyIncome) : existingTenant.monthlyIncome,
                             employmentStatus: employmentStatus || existingTenant.employmentStatus,
                             currentAddress: currentAddress || existingTenant.currentAddress,
+                            preferredName: preferredName || existingTenant.preferredName,
+                            altPhone: altPhone || existingTenant.altPhone,
+                            moveInDate: moveInDate || existingTenant.moveInDate,
+                            invoiceStartDate: invoiceStartDate || existingTenant.invoiceStartDate,
+                            gender: gender || existingTenant.gender,
+                            previousBalance: previousBalance !== undefined ? (previousBalance ? Number(previousBalance) : 0) : existingTenant.previousBalance,
+                            openingBalance: openingBalance !== undefined ? (openingBalance ? Number(openingBalance) : 0) : existingTenant.openingBalance,
                         },
                     });
                     return (0, apiResponse_js_1.sendSuccess)({ res, statusCode: 200, data: updatedTenant });
@@ -125,6 +132,13 @@ class TenantController {
                     monthlyIncome: monthlyIncome ? Number(monthlyIncome) : null,
                     employmentStatus: employmentStatus || null,
                     currentAddress: currentAddress || null,
+                    preferredName: preferredName || null,
+                    altPhone: altPhone || null,
+                    moveInDate: moveInDate || null,
+                    invoiceStartDate: invoiceStartDate || null,
+                    gender: gender || null,
+                    previousBalance: previousBalance !== undefined && previousBalance !== '' ? Number(previousBalance) : 0,
+                    openingBalance: openingBalance !== undefined && openingBalance !== '' ? Number(openingBalance) : (previousBalance !== undefined && previousBalance !== '' ? Number(previousBalance) : 0),
                 },
             });
             if (password) {
@@ -176,7 +190,7 @@ class TenantController {
     }
     async update(req, res, next) {
         try {
-            const { firstName, lastName, email, phone, unitId, status, password, dob, nationality, idType, idNumber, emergencyName, emergencyRelationship, emergencyPhone, employer, position, monthlyIncome, employmentStatus, currentAddress, } = req.body;
+            const { firstName, lastName, email, phone, unitId, status, password, dob, nationality, idType, idNumber, emergencyName, emergencyRelationship, emergencyPhone, employer, position, monthlyIncome, employmentStatus, currentAddress, preferredName, altPhone, moveInDate, invoiceStartDate, gender, previousBalance, openingBalance, } = req.body;
             const companyId = req.user?.companyId;
             const id = req.params.id;
             const file = req.file;
@@ -231,6 +245,13 @@ class TenantController {
                     monthlyIncome: monthlyIncome !== undefined ? (monthlyIncome ? Number(monthlyIncome) : null) : undefined,
                     employmentStatus: employmentStatus !== undefined ? employmentStatus : undefined,
                     currentAddress: currentAddress !== undefined ? currentAddress : undefined,
+                    preferredName: preferredName !== undefined ? preferredName : undefined,
+                    altPhone: altPhone !== undefined ? altPhone : undefined,
+                    moveInDate: moveInDate !== undefined ? moveInDate : undefined,
+                    invoiceStartDate: invoiceStartDate !== undefined ? invoiceStartDate : undefined,
+                    gender: gender !== undefined ? gender : undefined,
+                    previousBalance: previousBalance !== undefined && previousBalance !== '' ? Number(previousBalance) : undefined,
+                    openingBalance: openingBalance !== undefined && openingBalance !== '' ? Number(openingBalance) : undefined,
                 },
             });
             if (password) {

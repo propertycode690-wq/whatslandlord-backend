@@ -8,48 +8,12 @@ const database_1 = __importDefault(require("../../config/database"));
 class ReportRepository {
     // 1. Rent Roll Report Data
     async getRentRollData(params) {
-        const { propertyIds, propertyId, unitId, tenantId, leaseStatus, search, page, limit, sortBy, sortOrder = 'asc' } = params;
+        const { propertyIds, propertyId, unitId, tenantId, leaseStatus, startDate, endDate, search, page, limit, sortBy, sortOrder = 'asc' } = params;
         const activePropertyIds = propertyId ? [propertyId] : propertyIds;
         if (activePropertyIds.length === 0) {
             return { units: [], totalRecords: 0, summary: { totalMonthlyRent: 0, totalSecurityDeposits: 0, occupiedCount: 0, vacantCount: 0, totalUnits: 0 } };
         }
-        const targetPropertyIds = propertyId ? [propertyId] : activePropertyIds;
-        // 1. Calculate portfolio-wide summary across all properties in scope
-        const portfolioUnits = await database_1.default.unit.findMany({
-            where: {
-                propertyId: { in: targetPropertyIds },
-                property: {
-                    status: { notIn: ['Inactive', 'Deleted'] },
-                    ...(params.companyId ? { companyId: params.companyId } : {}),
-                },
-            },
-            include: {
-                leases: {
-                    where: { status: 'Active' },
-                    orderBy: { startDate: 'desc' },
-                    take: 1,
-                },
-            },
-        });
-        let totalMonthlyRent = 0;
-        let totalSecurityDeposits = 0;
-        let occupiedCount = 0;
-        let vacantCount = 0;
-        portfolioUnits.forEach((u) => {
-            const activeLease = u.leases && u.leases.length > 0 ? u.leases[0] : null;
-            const isOccupied = Boolean(activeLease) || u.status === 'Occupied';
-            if (isOccupied) {
-                occupiedCount++;
-            }
-            else {
-                vacantCount++;
-            }
-            const rent = activeLease ? Number(activeLease.rentAmount || u.rentAmount || 0) : Number(u.rentAmount || 0);
-            const deposit = activeLease ? Number(activeLease.depositAmount || u.securityDeposit || 0) : Number(u.securityDeposit || 0);
-            totalMonthlyRent += rent;
-            totalSecurityDeposits += deposit;
-        });
-        // 2. Build whereClause for filtered list of units
+        // 1. Build whereClause for filtered list of units
         const whereClause = {
             propertyId: { in: activePropertyIds },
             property: {
@@ -93,6 +57,23 @@ class ReportRepository {
                 ];
             }
         }
+        if (startDate || endDate) {
+            const leaseDateFilter = {};
+            if (startDate)
+                leaseDateFilter.gte = startDate;
+            if (endDate)
+                leaseDateFilter.lte = endDate;
+            const dateConditions = [
+                { leases: { some: { startDate: leaseDateFilter } } },
+                { leases: { some: { endDate: leaseDateFilter } } },
+            ];
+            if (whereClause.AND) {
+                whereClause.AND.push({ OR: dateConditions });
+            }
+            else {
+                whereClause.AND = [{ OR: dateConditions }];
+            }
+        }
         if (search) {
             const searchConditions = [
                 { unitNumber: { contains: search } },
@@ -118,7 +99,7 @@ class ReportRepository {
             orderBy = { securityDeposit: sortOrder };
         if (sortBy === 'unitNumber')
             orderBy = { unitNumber: sortOrder };
-        const [units, totalRecords] = await Promise.all([
+        const [units, totalRecords, summaryUnits] = await Promise.all([
             database_1.default.unit.findMany({
                 where: whereClause,
                 include: {
@@ -136,7 +117,35 @@ class ReportRepository {
                 take: limit,
             }),
             database_1.default.unit.count({ where: whereClause }),
+            database_1.default.unit.findMany({
+                where: whereClause,
+                include: {
+                    leases: {
+                        where: { status: 'Active' },
+                        orderBy: { startDate: 'desc' },
+                        take: 1,
+                    },
+                },
+            }),
         ]);
+        let totalMonthlyRent = 0;
+        let totalSecurityDeposits = 0;
+        let occupiedCount = 0;
+        let vacantCount = 0;
+        summaryUnits.forEach((u) => {
+            const activeLease = u.leases && u.leases.length > 0 ? u.leases[0] : null;
+            const isOccupied = Boolean(activeLease) || u.status === 'Occupied';
+            if (isOccupied) {
+                occupiedCount++;
+            }
+            else {
+                vacantCount++;
+            }
+            const rent = activeLease ? Number(activeLease.rentAmount || u.rentAmount || 0) : Number(u.rentAmount || 0);
+            const deposit = activeLease ? Number(activeLease.depositAmount || u.securityDeposit || 0) : Number(u.securityDeposit || 0);
+            totalMonthlyRent += rent;
+            totalSecurityDeposits += deposit;
+        });
         return {
             units,
             totalRecords,
@@ -145,7 +154,7 @@ class ReportRepository {
                 totalSecurityDeposits,
                 occupiedCount,
                 vacantCount,
-                totalUnits: portfolioUnits.length,
+                totalUnits: totalRecords,
             },
         };
     }

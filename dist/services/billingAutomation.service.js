@@ -18,11 +18,19 @@ function getNewYorkDate() {
 function parseDateUTC(dateStr) {
     if (!dateStr)
         return null;
-    const cleanStr = dateStr.split('T')[0];
+    const cleanStr = dateStr.split('T')[0].trim().replace(/\//g, '-');
     const parts = cleanStr.split('-').map(Number);
     if (parts.length !== 3 || parts.some(isNaN))
         return null;
-    return new Date(Date.UTC(parts[0], parts[1] - 1, parts[2]));
+    let year = parts[0];
+    let month = parts[1];
+    let day = parts[2];
+    if (parts[2] > 1000) {
+        year = parts[2];
+        day = parts[0];
+        month = parts[1];
+    }
+    return new Date(Date.UTC(year, month - 1, day));
 }
 async function generateAutoInvoices() {
     try {
@@ -41,7 +49,11 @@ async function generateAutoInvoices() {
         for (const lease of activeLeases) {
             if (!lease.tenantId || !lease.startDate)
                 continue;
-            const start = parseDateUTC(lease.startDate.toISOString());
+            const rawInvoiceStartStr = lease.tenant?.invoiceStartDate;
+            const parsedInvoiceStart = rawInvoiceStartStr ? parseDateUTC(rawInvoiceStartStr) : null;
+            const start = (parsedInvoiceStart && !isNaN(parsedInvoiceStart.getTime()))
+                ? parsedInvoiceStart
+                : parseDateUTC(lease.startDate.toISOString());
             if (!start || start > today)
                 continue;
             const end = lease.endDate ? parseDateUTC(lease.endDate.toISOString()) : new Date(Date.UTC(2099, 11, 31));
@@ -175,6 +187,8 @@ async function generateAutoLateFees() {
             // Ensure it is a rent-related invoice
             const lineItemsStr = String(inv.lineItems || '').toLowerCase();
             if (!lineItemsStr.includes('rent'))
+                continue;
+            if (lineItemsStr.includes('late fee'))
                 continue;
             const due = parseDateUTC(inv.dueDate);
             if (!due)

@@ -3,7 +3,12 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.io = void 0;
 const app_1 = __importDefault(require("./app"));
+const http_1 = __importDefault(require("http"));
+const socket_io_1 = require("socket.io");
+const jwt_js_1 = require("./utils/jwt.js");
+const chat_service_js_1 = require("./services/chat.service.js");
 const env_1 = require("./config/env");
 const logger_1 = require("./config/logger");
 const database_1 = __importDefault(require("./config/database"));
@@ -40,6 +45,18 @@ async function bootstrapDb() {
                 }
             });
         }
+        const tenantTableCols = [
+            'ALTER TABLE tenants ADD COLUMN gender VARCHAR(191) NULL;',
+            'ALTER TABLE tenants ADD COLUMN previousBalance DOUBLE NULL DEFAULT 0;',
+            'ALTER TABLE tenants ADD COLUMN openingBalance DOUBLE NULL DEFAULT 0;'
+        ];
+        for (const sql of tenantTableCols) {
+            await database_1.default.$executeRawUnsafe(sql).catch((e) => {
+                if (!e.message.includes('1060') && !e.message.includes('Duplicate column')) {
+                    logger_1.logger.warn(`DDL execution warning: ${e.message}`);
+                }
+            });
+        }
         // Ensure restore_bin table exists
         await database_1.default.$executeRawUnsafe(`
       CREATE TABLE IF NOT EXISTS restore_bin (
@@ -58,6 +75,40 @@ async function bootstrapDb() {
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `).catch((e) => {
             logger_1.logger.warn(`restore_bin table init warning: ${e.message}`);
+        });
+        // Ensure conversations and chat_messages tables exist
+        await database_1.default.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS conversations (
+        id VARCHAR(191) NOT NULL PRIMARY KEY,
+        companyId VARCHAR(191) NOT NULL,
+        participantType VARCHAR(191) NOT NULL,
+        tenantId VARCHAR(191) NULL,
+        ownerId VARCHAR(191) NULL,
+        staffId VARCHAR(191) NULL,
+        lastMessageAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+        status VARCHAR(191) NOT NULL DEFAULT 'ACTIVE',
+        createdAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+        updatedAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `).catch((e) => {
+            logger_1.logger.warn(`conversations table init warning: ${e.message}`);
+        });
+        await database_1.default.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS chat_messages (
+        id VARCHAR(191) NOT NULL PRIMARY KEY,
+        companyId VARCHAR(191) NOT NULL,
+        conversationId VARCHAR(191) NOT NULL,
+        senderRole VARCHAR(191) NOT NULL,
+        senderId VARCHAR(191) NOT NULL,
+        recipientRole VARCHAR(191) NOT NULL,
+        recipientId VARCHAR(191) NOT NULL,
+        body TEXT NOT NULL,
+        status VARCHAR(191) NOT NULL DEFAULT 'SENT',
+        createdAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+        readAt DATETIME(3) NULL
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `).catch((e) => {
+            logger_1.logger.warn(`chat_messages table init warning: ${e.message}`);
         });
         // Clean up unwanted seeded mock Chart of Accounts from database
         const mockCoA = await database_1.default.coAAccount.findMany({
@@ -125,9 +176,7 @@ database_1.default.$connect()
     logger_1.logger.info('🔌 MySQL Database connected successfully via Prisma Client!');
     await bootstrapDb();
     await (0, companyHelper_js_1.autoHealMissingCompanyIds)();
-    // Start background auto-billing on server start (America/New_York)
-    (0, billingAutomation_service_1.generateAutoInvoices)().catch(e => logger_1.logger.error(e, 'Auto-invoices startup error'));
-    (0, billingAutomation_service_1.generateAutoLateFees)().catch(e => logger_1.logger.error(e, 'Auto-late-fees startup error'));
+    // Background auto-billing scheduled via daily cron (America/New_York)
     // Schedule daily cron job at 00:05 AM US Eastern Time (America/New_York)
     node_cron_1.default.schedule('5 0 * * *', () => {
         logger_1.logger.info('⏰ Running daily midnight billing cron (America/New_York)...');
@@ -148,7 +197,79 @@ database_1.default.$connect()
     .catch((error) => {
     logger_1.logger.error(error, '❌ Failed to connect to the MySQL database:');
 });
-const server = app_1.default.listen(env_1.env.PORT, () => {
+const httpServer = http_1.default.createServer(app_1.default);
+exports.io = new socket_io_1.Server(httpServer, {
+    cors: {
+        origin: '*',
+        methods: ['GET', 'POST'],
+        credentials: true,
+    },
+});
+app_1.default.set('io', exports.io);
+exports.io.use((socket, next) => {
+    const token = socket.handshake.auth?.token || socket.handshake.headers?.authorization?.replace('Bearer ', '');
+    if (!token) {
+        return next(new Error('Authentication token missing'));
+    }
+    try {
+        const payload = (0, jwt_js_1.verifyAccessToken)(token);
+        socket.data.user = payload;
+        next();
+    }
+    catch (err) {
+        next(new Error('Invalid token'));
+    }
+});
+exports.io.on('connection', (socket) => {
+    const user = socket.data.user;
+    if (!user)
+        return;
+    const companyRoom = user.companyId ? `company:${user.companyId}` : null;
+    const userRoom = user.userId ? `user:${user.userId}` : null;
+    if (companyRoom)
+        socket.join(companyRoom);
+    if (userRoom)
+        socket.join(userRoom);
+    socket.on('join:conversation', (conversationId) => {
+        socket.join(`conversation:${conversationId}`);
+    });
+    socket.on('leave:conversation', (conversationId) => {
+        socket.leave(`conversation:${conversationId}`);
+    });
+    socket.on('message:send', async (data) => {
+        try {
+            const savedMsg = await chat_service_js_1.chatService.sendMessage(data.conversationId, data.body, user);
+            exports.io.to(`conversation:${data.conversationId}`).emit('message:new', savedMsg);
+            if (companyRoom) {
+                exports.io.to(companyRoom).emit('conversation:updated', {
+                    conversationId: data.conversationId,
+                    lastMessage: savedMsg.body,
+                    lastMessageAt: savedMsg.createdAt,
+                    senderId: savedMsg.senderId,
+                });
+            }
+            socket.emit('message:status', {
+                messageId: savedMsg.id,
+                status: 'DELIVERED',
+            });
+        }
+        catch (err) {
+            socket.emit('message:error', { error: err.message });
+        }
+    });
+    socket.on('message:read', async (data) => {
+        try {
+            await chat_service_js_1.chatService.markAsRead(data.conversationId, user);
+            exports.io.to(`conversation:${data.conversationId}`).emit('message:read_receipt', {
+                conversationId: data.conversationId,
+            });
+        }
+        catch (err) {
+            // ignore
+        }
+    });
+});
+const server = httpServer.listen(env_1.env.PORT, () => {
     logger_1.logger.info(`🚀 WhatsLandlord ERP Backend Server running on http://localhost:${env_1.env.PORT}${env_1.env.API_PREFIX}`);
     logger_1.logger.info(`Environment: ${env_1.env.NODE_ENV}`);
 });

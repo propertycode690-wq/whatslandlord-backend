@@ -130,8 +130,8 @@ class WorkOrderController {
                         propertyName: sr.propertyName || 'Oakridge Heights',
                         unitNumber: sr.unitNumber ? `Unit ${sr.unitNumber}` : 'Unit 102',
                         vendorId: sr.assignedVendorId || '',
-                        vendorName: sr.assignedVendorName || 'ProFix Solutions',
-                        assignedTechnician: sr.assignedVendorName || sr.assignedTechnician || 'Technician Lead 1',
+                        vendorName: sr.assignedVendorName || '',
+                        assignedTechnician: sr.assignedVendorName || sr.assignedTechnician || '',
                         scheduledDate: sr.scheduledDate || new Date().toISOString().split('T')[0],
                         preferredTime: sr.scheduledDate || (sr.notes?.includes('Preferred Visit:') ? sr.notes.replace('Preferred Visit:', '').trim() : null) || (sr.description?.match(/\[Preferred Visit:\s*([^\]]+)\]/)?.[1]) || null,
                         priority: sr.priority || 'Normal',
@@ -196,7 +196,7 @@ class WorkOrderController {
     async update(req, res, next) {
         try {
             const id = req.params['id'];
-            const { status, priority, estimatedCost, actualCost, extraCost, cost, vendorId, rejectReason, resolutionNotes } = req.body;
+            const { status, priority, estimatedCost, actualCost, extraCost, cost, vendorId, vendorName, rejectReason, resolutionNotes } = req.body;
             const companyId = req.user?.companyId;
             const statusMap = {
                 'Open': 'Open',
@@ -218,6 +218,12 @@ class WorkOrderController {
             // 1. Check ServiceRequest table
             const existingSr = await database_js_1.default.serviceRequest.findUnique({ where: { id } });
             if (existingSr) {
+                let assignedVendorName = vendorName;
+                if (vendorId && !assignedVendorName) {
+                    const v = await database_js_1.default.vendor.findUnique({ where: { id: vendorId } });
+                    if (v)
+                        assignedVendorName = v.companyName || v.contactName;
+                }
                 const srStatus = finalStatus === 'InProgress' ? 'In Progress' : finalStatus;
                 const updatedSr = await database_js_1.default.serviceRequest.update({
                     where: { id },
@@ -226,6 +232,8 @@ class WorkOrderController {
                         ...(resolvedActualCost !== undefined && { cost: resolvedActualCost }),
                         ...(estimatedCost !== undefined && { estimatedCost: parseFloat(String(estimatedCost)) }),
                         ...(rejectReason && { notes: rejectReason }),
+                        ...(vendorId !== undefined && { assignedVendorId: vendorId || null }),
+                        ...(assignedVendorName !== undefined && { assignedVendorName: assignedVendorName || null }),
                     },
                 });
                 // Notify Tenant if status changed

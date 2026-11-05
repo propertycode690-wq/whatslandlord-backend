@@ -12,6 +12,14 @@ exports.createTenantSchema = zod_1.z.object({
         unitId: zod_1.z.string().uuid('Invalid Unit ID format').optional().nullable(),
         status: tenantStatusEnum.default('Pending'),
         password: zod_1.z.string({ required_error: 'Password is required' }).min(6, 'Password must be at least 6 characters'),
+        dob: zod_1.z.string().optional().nullable(),
+        preferredName: zod_1.z.string().optional().nullable(),
+        altPhone: zod_1.z.string().optional().nullable(),
+        moveInDate: zod_1.z.string().optional().nullable(),
+        invoiceStartDate: zod_1.z.string().optional().nullable(),
+        gender: zod_1.z.string().optional().nullable(),
+        previousBalance: zod_1.z.union([zod_1.z.number(), zod_1.z.string()]).optional().nullable(),
+        openingBalance: zod_1.z.union([zod_1.z.number(), zod_1.z.string()]).optional().nullable(),
     }),
 });
 exports.updateTenantSchema = zod_1.z.object({
@@ -42,5 +50,7 @@ exports.updateTenantSchema = zod_1.z.object({
         preferredName: zod_1.z.string().optional().nullable(),
         altPhone: zod_1.z.string().optional().nullable(),
         gender: zod_1.z.string().optional().nullable(),
+        previousBalance: zod_1.z.union([zod_1.z.number(), zod_1.z.string()]).optional().nullable(),
+        openingBalance: zod_1.z.union([zod_1.z.number(), zod_1.z.string()]).optional().nullable(),
     }),
 });

@@ -91,7 +91,7 @@ export class ReportService {
   async getRentRoll(user: any, query: any) {
     const companyId = user.companyId;
     const allowedProperties = await this.resolveAllowedProperties(user, companyId);
-    
+
     if (!companyId || allowedProperties.length === 0) {
       return {
         data: [],
@@ -110,6 +110,8 @@ export class ReportService {
       unitId: query.unitId,
       tenantId: query.tenantId,
       leaseStatus: query.status,
+      startDate: query.startDate ? new Date(query.startDate) : undefined,
+      endDate: query.endDate ? new Date(query.endDate) : undefined,
       search: query.search,
       page,
       limit,
@@ -385,11 +387,11 @@ export class ReportService {
             status: 'Paid',
             ...(startDate || endDate
               ? {
-                  paidDate: {
-                    ...(startDate ? { gte: startDate } : {}),
-                    ...(endDate ? { lte: endDate } : {}),
-                  },
-                }
+                paidDate: {
+                  ...(startDate ? { gte: startDate } : {}),
+                  ...(endDate ? { lte: endDate } : {}),
+                },
+              }
               : {}),
           },
           include: { property: true, tenant: true, unit: true },

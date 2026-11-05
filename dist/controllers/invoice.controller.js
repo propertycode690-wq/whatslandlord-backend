@@ -6,15 +6,11 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.invoiceController = void 0;
 const database_1 = __importDefault(require("../config/database"));
 const apiResponse_1 = require("../utils/apiResponse");
-const billingAutomation_service_1 = require("../services/billingAutomation.service");
 const env_1 = require("../config/env");
 const notification_helper_1 = require("../services/notification.helper");
 class InvoiceController {
     async getAll(req, res, next) {
         try {
-            // Auto-generate rent invoices & late fees (catch-up)
-            await (0, billingAutomation_service_1.generateAutoInvoices)();
-            await (0, billingAutomation_service_1.generateAutoLateFees)();
             const companyId = req.user?.companyId;
             const userRole = req.user?.roleName || req.user?.role;
             const userEmail = req.user?.email;

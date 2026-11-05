@@ -102,6 +102,8 @@ class ReportService {
             unitId: query.unitId,
             tenantId: query.tenantId,
             leaseStatus: query.status,
+            startDate: query.startDate ? new Date(query.startDate) : undefined,
+            endDate: query.endDate ? new Date(query.endDate) : undefined,
             search: query.search,
             page,
             limit,
