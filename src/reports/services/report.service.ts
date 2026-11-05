@@ -9,13 +9,18 @@ export class ReportService {
     this.reportRepository = new ReportRepository();
   }
 
-  // Helper: Resolve Allowed Property IDs for a User (Strict Manager Isolation)
+  // Helper: Resolve Allowed Property IDs for a User (Strict Manager Isolation + Soft-Delete Exclusion)
   async resolveAllowedProperties(user: any, companyId?: string): Promise<string[]> {
     if (!user) {
       throw new AppError('Unauthorized access.', 401, 'UNAUTHORIZED');
     }
 
     const userRole = (user.roleName || user.role || (user.role && user.role.name) || '').toString();
+    const softDeleted = await this.reportRepository.getSoftDeletedIds(companyId || user?.companyId);
+    const excludeDeletedProps = softDeleted.properties;
+
+    const filterActiveIds = (props: { id: string }[]) =>
+      props.map((p) => p.id).filter((id) => !excludeDeletedProps.includes(id));
 
     // 1. Check explicit UserAssignments for the manager/user
     const assignments = await prisma.userAssignment.findMany({
@@ -26,17 +31,17 @@ export class ReportService {
     });
     const assignedIds = assignments
       .map((a) => a.propertyId)
-      .filter((id): id is string => Boolean(id));
+      .filter((id): id is string => Boolean(id) && !excludeDeletedProps.includes(id as string));
 
     if (assignedIds.length > 0) {
       const activeProps = await prisma.property.findMany({
         where: {
           id: { in: assignedIds },
-          status: { notIn: ['Inactive', 'Deleted'] },
+          status: { notIn: ['Inactive', 'Deleted', 'Draft'] },
         },
         select: { id: true },
       });
-      return activeProps.map((p) => p.id);
+      return filterActiveIds(activeProps);
     }
 
     // 2. Filter by Company ID if manager has a companyId
@@ -45,12 +50,13 @@ export class ReportService {
       const companyProperties = await prisma.property.findMany({
         where: {
           companyId: targetCompanyId,
-          status: { notIn: ['Inactive', 'Deleted'] },
+          status: { notIn: ['Inactive', 'Deleted', 'Draft'] },
         },
         select: { id: true },
       });
-      if (companyProperties.length > 0) {
-        return companyProperties.map((p) => p.id);
+      const filtered = filterActiveIds(companyProperties);
+      if (filtered.length > 0) {
+        return filtered;
       }
     }
 
@@ -58,44 +64,53 @@ export class ReportService {
     const ownerProperties = await prisma.property.findMany({
       where: {
         ownerId: user.id,
-        status: { notIn: ['Inactive', 'Deleted'] },
+        status: { notIn: ['Inactive', 'Deleted', 'Draft'] },
       },
       select: { id: true },
     });
-    if (ownerProperties.length > 0) {
-      return ownerProperties.map((p) => p.id);
+    const filteredOwnerProps = filterActiveIds(ownerProperties);
+    if (filteredOwnerProps.length > 0) {
+      return filteredOwnerProps;
     }
 
     // 4. SuperAdmin or Admin role can view all properties
     if (userRole === 'SuperAdmin' || userRole === 'Admin') {
       const allProps = await prisma.property.findMany({
         where: {
-          status: { notIn: ['Inactive', 'Deleted'] },
+          status: { notIn: ['Inactive', 'Deleted', 'Draft'] },
         },
         select: { id: true },
       });
-      return allProps.map((p) => p.id);
+      return filterActiveIds(allProps);
     }
 
     // 5. Fallback for single-manager DB setups
     const properties = await prisma.property.findMany({
       where: {
-        status: { notIn: ['Inactive', 'Deleted'] },
+        status: { notIn: ['Inactive', 'Deleted', 'Draft'] },
       },
       select: { id: true },
     });
-    return properties.map((p) => p.id);
+    return filterActiveIds(properties);
   }
 
   // 1. Rent Roll
   async getRentRoll(user: any, query: any) {
-    const companyId = user.companyId;
+    const companyId = user?.companyId;
     const allowedProperties = await this.resolveAllowedProperties(user, companyId);
 
-    if (!companyId || allowedProperties.length === 0) {
+    if (allowedProperties.length === 0) {
       return {
         data: [],
-        summary: { totalMonthlyRent: 0, totalSecurityDeposits: 0, occupiedCount: 0, vacantCount: 0, totalUnits: 0 },
+        summary: {
+          totalMonthlyRent: 0,
+          totalPotentialRent: 0,
+          totalVacancyLoss: 0,
+          totalSecurityDeposits: 0,
+          occupiedCount: 0,
+          vacantCount: 0,
+          totalUnits: 0,
+        },
         pagination: { page: 1, limit: 50, totalRecords: 0, totalPages: 0 },
       };
     }
@@ -119,35 +134,72 @@ export class ReportService {
       sortOrder: query.sortOrder,
     });
 
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const todayMs = todayStart.getTime();
+
     const units = result.units || [];
     const data = units.map((u: any) => {
-      const activeLease = u.leases && u.leases.length > 0 ? u.leases[0] : null;
-      const tenantObj = activeLease?.tenant || (u.tenants && u.tenants.length > 0 ? u.tenants[0] : null);
+      const validLeases = Array.isArray(u.leases) ? u.leases : [];
+      const activeLease = validLeases.find((l: any) => l.status === 'Active') || null;
+      // If user explicitly filtered by a non-active lease status (e.g. Expired/Terminated/Draft), show that lease's info in the row, but only count Active leases as Occupied/earning rent
+      const displayLease = activeLease || (query.status && validLeases.length > 0 ? validLeases[0] : null);
 
-      const isOccupied = Boolean(activeLease) || u.status === 'Occupied';
-      const tenantName = tenantObj
-        ? `${tenantObj.firstName} ${tenantObj.lastName}`.trim()
-        : (isOccupied ? 'Tenant Assigned' : 'Vacant');
+      const validTenants = Array.isArray(u.tenants) ? u.tenants.filter((t: any) => t && t.status === 'Active') : [];
+      const tenantObj = displayLease?.tenant || (validTenants.length > 0 ? validTenants[0] : null);
 
-      const leaseStatus = activeLease ? (activeLease.status || 'Active') : (isOccupied ? 'Active' : 'Vacant');
-      const unitStatus = isOccupied ? 'Occupied' : (u.status || 'Vacant');
+      // Strict Occupancy Rule: Must have an Active Lease OR (Unit is marked Occupied AND has an Active Tenant)
+      const isOccupied = Boolean(activeLease) || (u.status === 'Occupied' && validTenants.length > 0);
 
-      const monthlyRent = Number(activeLease ? (activeLease.rentAmount ?? u.rentAmount ?? 0) : (u.rentAmount ?? 0));
-      const securityDeposit = Number(activeLease ? (activeLease.depositAmount ?? u.securityDeposit ?? 0) : (u.securityDeposit ?? 0));
+      const tenantName = isOccupied && tenantObj
+        ? `${tenantObj.firstName || ''} ${tenantObj.lastName || ''}`.trim()
+        : (displayLease && tenantObj ? `${tenantObj.firstName || ''} ${tenantObj.lastName || ''}`.trim() : 'Vacant');
 
-      const startDate = activeLease?.startDate
-        ? new Date(activeLease.startDate).toISOString().split('T')[0]
+      const leaseStatus = activeLease
+        ? 'Active'
+        : (displayLease?.status ? displayLease.status : (isOccupied ? 'Active' : 'Vacant'));
+
+      const unitStatus = isOccupied ? 'Occupied' : (u.status && u.status !== 'Occupied' ? u.status : 'Vacant');
+
+      const unitMarketRent = Number(u.rentAmount || 0);
+      const activeRent = activeLease ? Number(activeLease.rentAmount ?? unitMarketRent) : unitMarketRent;
+
+      const potentialRent = isOccupied ? activeRent : unitMarketRent;
+      const monthlyRent = isOccupied ? activeRent : 0;
+      const vacancyLoss = isOccupied ? 0 : unitMarketRent;
+      const securityDeposit = isOccupied
+        ? Number(activeLease ? (activeLease.depositAmount ?? u.securityDeposit ?? 0) : (u.securityDeposit ?? 0))
+        : 0;
+
+      const startDate = displayLease?.startDate
+        ? new Date(displayLease.startDate).toISOString().split('T')[0]
         : 'N/A';
-      const endDate = activeLease?.endDate
-        ? new Date(activeLease.endDate).toISOString().split('T')[0]
+      const endDate = displayLease?.endDate
+        ? new Date(displayLease.endDate).toISOString().split('T')[0]
         : 'N/A';
+
+      let daysToExpiry = 'N/A';
+      let daysToExpiryNum: number | null = null;
+      if (displayLease?.endDate && (isOccupied || displayLease.status === 'Expired')) {
+        const endD = new Date(displayLease.endDate);
+        endD.setHours(0, 0, 0, 0);
+        const diffDays = Math.ceil((endD.getTime() - todayMs) / (1000 * 60 * 60 * 24));
+        daysToExpiryNum = diffDays;
+        if (diffDays < 0) {
+          daysToExpiry = `Expired (${Math.abs(diffDays)}d ago)`;
+        } else if (diffDays === 0) {
+          daysToExpiry = 'Expires Today';
+        } else {
+          daysToExpiry = `${diffDays} Days`;
+        }
+      }
 
       const rawUnitNum = u.unitNumber ? u.unitNumber.toString().trim() : '101';
       const unitNumber = rawUnitNum.toLowerCase().startsWith('unit') ? rawUnitNum : `Unit ${rawUnitNum}`;
 
       return {
-        id: activeLease?.id || u.id,
-        leaseId: activeLease?.id || null,
+        id: displayLease?.id || u.id,
+        leaseId: displayLease?.id || null,
         propertyId: u.propertyId,
         unitId: u.id,
         tenantId: tenantObj?.id || null,
@@ -156,22 +208,46 @@ export class ReportService {
         tenantName,
         startDate,
         endDate,
+        daysToExpiry,
+        daysToExpiryNum,
         leaseStatus,
+        potentialRent,
         monthlyRent,
+        vacancyLoss,
         securityDeposit,
         unitStatus,
       };
     });
 
-    const totalMonthlyRent = result.summary?.totalMonthlyRent ?? data.reduce((sum, item) => sum + item.monthlyRent, 0);
-    const totalSecurityDeposits = result.summary?.totalSecurityDeposits ?? data.reduce((sum, item) => sum + item.securityDeposit, 0);
-    const occupiedCount = result.summary?.occupiedCount ?? data.filter((item) => item.unitStatus === 'Occupied' || item.leaseStatus === 'Active').length;
+    // Support sorting by computed columns like daysToExpiryNum, potentialRent, monthlyRent, vacancyLoss
+    if (query.sortBy === 'daysToExpiry') {
+      const dir = query.sortOrder === 'desc' ? -1 : 1;
+      data.sort((a: any, b: any) => {
+        const valA = a.daysToExpiryNum !== null && a.daysToExpiryNum !== undefined ? a.daysToExpiryNum : 999999;
+        const valB = b.daysToExpiryNum !== null && b.daysToExpiryNum !== undefined ? b.daysToExpiryNum : 999999;
+        return (valA - valB) * dir;
+      });
+    } else if (query.sortBy === 'vacancyLoss') {
+      const dir = query.sortOrder === 'desc' ? -1 : 1;
+      data.sort((a: any, b: any) => (a.vacancyLoss - b.vacancyLoss) * dir);
+    } else if (query.sortBy === 'monthlyRent') {
+      const dir = query.sortOrder === 'desc' ? -1 : 1;
+      data.sort((a: any, b: any) => (a.monthlyRent - b.monthlyRent) * dir);
+    }
+
+    const totalMonthlyRent = result.summary?.totalMonthlyRent ?? data.reduce((sum: number, item: any) => sum + item.monthlyRent, 0);
+    const totalPotentialRent = result.summary?.totalPotentialRent ?? data.reduce((sum: number, item: any) => sum + item.potentialRent, 0);
+    const totalVacancyLoss = result.summary?.totalVacancyLoss ?? data.reduce((sum: number, item: any) => sum + item.vacancyLoss, 0);
+    const totalSecurityDeposits = result.summary?.totalSecurityDeposits ?? data.reduce((sum: number, item: any) => sum + item.securityDeposit, 0);
+    const occupiedCount = result.summary?.occupiedCount ?? data.filter((item: any) => item.unitStatus === 'Occupied').length;
     const vacantCount = result.summary?.vacantCount ?? Math.max(0, data.length - occupiedCount);
 
     return {
       data,
       summary: {
         totalMonthlyRent,
+        totalPotentialRent,
+        totalVacancyLoss,
         totalSecurityDeposits,
         occupiedCount,
         vacantCount,
