@@ -275,6 +275,7 @@ export class ReportService {
       companyId,
       propertyIds: allowedProperties,
       propertyId: query.propertyId,
+      unitId: query.unitId,
       tenantId: query.tenantId,
       status: query.status,
       startDate: query.startDate ? new Date(query.startDate) : undefined,
@@ -291,7 +292,7 @@ export class ReportService {
     const delinquentInvoices = result.invoices.filter((inv) => {
       if (query.status) return true;
       const statusLower = (inv.status || '').toLowerCase();
-      const isPaid = statusLower === 'paid' || statusLower === 'cleared';
+      const isPaid = (statusLower === 'paid' || statusLower === 'cleared') && Number(inv.balance || 0) <= 0;
       return !isPaid;
     });
 
@@ -303,14 +304,17 @@ export class ReportService {
       const rentAmount = Number(inv.amount || 0);
       const paidAmount = Number(inv.paidAmount || 0);
       const outstandingBalance = Number(inv.balance ?? Math.max(0, rentAmount - paidAmount));
+      const unitId = inv.tenant?.unitId || (inv.tenant as any)?.unit?.id || (inv as any).unitId || '';
+      const unitNumber = inv.unitNumber || ((inv.tenant as any)?.unit?.unitNumber ? (String((inv.tenant as any).unit.unitNumber).trim().toLowerCase().startsWith('unit') ? String((inv.tenant as any).unit.unitNumber).trim() : `Unit ${(inv.tenant as any).unit.unitNumber}`) : 'Unit 101');
 
       return {
         invoiceId: inv.id,
         tenantId: inv.tenantId,
         propertyId: inv.propertyId,
+        unitId,
         tenantName: inv.tenant ? `${inv.tenant.firstName} ${inv.tenant.lastName}` : (inv.tenantName || 'Resident'),
         propertyName: inv.propertyName || 'Property',
-        unitNumber: inv.unitNumber || 'Unit 101',
+        unitNumber,
         dueDate: inv.dueDate ? new Date(inv.dueDate).toISOString().split('T')[0] : 'N/A',
         rentAmount,
         paidAmount,
@@ -648,6 +652,7 @@ export class ReportService {
       companyId,
       propertyIds: allowedProperties,
       propertyId: query.propertyId,
+      unitId: query.unitId,
       tenantId: query.tenantId,
       paymentMethod: query.paymentMethod,
       status: query.status,
@@ -663,6 +668,7 @@ export class ReportService {
       paymentId: p.id,
       tenantId: p.tenantId,
       propertyId: p.propertyId,
+      unitId: p.unitId || p.unit?.id || p.tenant?.unitId || '',
       receiptNo: `#${idx + 1}`,
       tenantName: p.tenant ? `${p.tenant.firstName} ${p.tenant.lastName}` : (p.tenantName || 'Resident'),
       propertyName: p.property?.name || p.propertyName || 'Property',
@@ -690,6 +696,7 @@ export class ReportService {
         invoiceId: inv.id,
         tenantId: inv.tenantId,
         propertyId: inv.propertyId,
+        unitId: inv.tenant?.unitId || (inv as any).unitId || '',
         receiptNo: `#INV-${1001 + idx}`,
         tenantName: inv.tenant ? `${inv.tenant.firstName} ${inv.tenant.lastName}` : (inv.tenantName || 'Resident'),
         propertyName: inv.propertyName || 'Property',
