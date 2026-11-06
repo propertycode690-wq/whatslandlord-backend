@@ -33,7 +33,45 @@ class TenantController {
                     invoices: true,
                 },
             });
-            return (0, apiResponse_js_1.sendSuccess)({ res, data: tenants });
+            // Reconcile invoices with rentPayment records so accurate balance is returned
+            const payments = await database_js_1.default.rentPayment.findMany({
+                where: {
+                    ...(companyId ? { companyId } : {}),
+                    status: { in: ['Paid', 'PartiallyPaid'] },
+                },
+            });
+            const reconciledTenants = tenants.map((tenant) => {
+                const tenantPayments = payments.filter((p) => {
+                    if (p.tenantId && p.tenantId === tenant.id)
+                        return true;
+                    if (tenant.unitId && p.unitId === tenant.unitId)
+                        return true;
+                    return false;
+                });
+                const reconciledInvoices = (tenant.invoices || []).map((inv) => {
+                    const invMonth = String(inv.dueDate || '').slice(0, 7);
+                    const matchedPayments = tenantPayments.filter((p) => {
+                        if (p.invoiceId && p.invoiceId === inv.id)
+                            return true;
+                        const pMonth = String(p.dueDate || p.paidDate || '').slice(0, 7);
+                        return pMonth && pMonth === invMonth;
+                    });
+                    const actualPaid = matchedPayments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
+                    const actualBalance = Math.max(0, Number(inv.amount || 0) - actualPaid);
+                    const newStatus = actualBalance === 0 ? 'Paid' : (actualPaid > 0 ? 'Partially Paid' : inv.status);
+                    return {
+                        ...inv,
+                        paidAmount: actualPaid > 0 ? actualPaid : inv.paidAmount,
+                        balance: actualBalance,
+                        status: newStatus,
+                    };
+                });
+                return {
+                    ...tenant,
+                    invoices: reconciledInvoices,
+                };
+            });
+            return (0, apiResponse_js_1.sendSuccess)({ res, data: reconciledTenants });
         }
         catch (error) {
             next(error);
@@ -188,7 +226,41 @@ class TenantController {
             });
             if (!tenant)
                 throw new appError_js_1.AppError('Tenant not found.', 404, 'NOT_FOUND');
-            return (0, apiResponse_js_1.sendSuccess)({ res, data: tenant });
+            // Reconcile invoices with rentPayment records for accurate balance
+            const tenantPayments = await database_js_1.default.rentPayment.findMany({
+                where: {
+                    OR: [
+                        { tenantId: tenant.id },
+                        ...(tenant.unitId ? [{ unitId: tenant.unitId }] : []),
+                    ],
+                    status: { in: ['Paid', 'PartiallyPaid'] },
+                },
+            });
+            const reconciledInvoices = (tenant.invoices || []).map((inv) => {
+                const invMonth = String(inv.dueDate || '').slice(0, 7);
+                const matchedPayments = tenantPayments.filter((p) => {
+                    if (p.invoiceId && p.invoiceId === inv.id)
+                        return true;
+                    const pMonth = String(p.dueDate || p.paidDate || '').slice(0, 7);
+                    return pMonth && pMonth === invMonth;
+                });
+                const actualPaid = matchedPayments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
+                const actualBalance = Math.max(0, Number(inv.amount || 0) - actualPaid);
+                const newStatus = actualBalance === 0 ? 'Paid' : (actualPaid > 0 ? 'Partially Paid' : inv.status);
+                return {
+                    ...inv,
+                    paidAmount: actualPaid > 0 ? actualPaid : inv.paidAmount,
+                    balance: actualBalance,
+                    status: newStatus,
+                };
+            });
+            return (0, apiResponse_js_1.sendSuccess)({
+                res,
+                data: {
+                    ...tenant,
+                    invoices: reconciledInvoices,
+                },
+            });
         }
         catch (error) {
             next(error);
