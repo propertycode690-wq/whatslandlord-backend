@@ -1404,15 +1404,56 @@ class PortalController {
             if (!companyId) {
                 return (0, apiResponse_1.sendSuccess)({ res, data: [] });
             }
+            // Safe query with inner relation check to exclude orphaned violations whose unit/property was deleted
             const violations = await database_1.default.violation.findMany({
-                where: { companyId },
+                where: {
+                    companyId,
+                    unit: {
+                        property: {
+                            status: { notIn: ['Inactive', 'Deleted'] },
+                        },
+                    },
+                },
                 include: {
                     unit: {
                         include: { property: true },
                     },
                 },
+                orderBy: { createdAt: 'desc' },
+            }).catch(async (err) => {
+                console.warn('Violations findMany with relation failed, falling back to safe query:', err?.message);
+                // Fallback: fetch raw violations and match against existing active units
+                const rawViolations = await database_1.default.violation.findMany({
+                    where: { companyId },
+                    orderBy: { createdAt: 'desc' },
+                });
+                const unitIds = [...new Set(rawViolations.map((v) => v.unitId).filter(Boolean))];
+                const units = await database_1.default.unit.findMany({
+                    where: {
+                        id: { in: unitIds },
+                        property: {
+                            status: { notIn: ['Inactive', 'Deleted'] },
+                        },
+                    },
+                    include: { property: true },
+                });
+                const unitMap = new Map(units.map((u) => [u.id, u]));
+                return rawViolations
+                    .filter((v) => unitMap.has(v.unitId))
+                    .map((v) => ({
+                    ...v,
+                    unit: unitMap.get(v.unitId),
+                }));
             });
-            return (0, apiResponse_1.sendSuccess)({ res, data: violations });
+            const formatted = (violations || []).map((v) => ({
+                ...v,
+                violationCode: v.title,
+                propertyName: v.unit?.property?.name || 'Building Asset',
+                propertyId: v.unit?.property?.id,
+                unitNumber: v.unit?.unitNumber || 'Building Wide',
+                property: v.unit?.property,
+            }));
+            return (0, apiResponse_1.sendSuccess)({ res, data: formatted });
         }
         catch (error) {
             next(error);
@@ -1567,10 +1608,11 @@ class PortalController {
                             });
                         }
                         else {
-                            // Update status and description if changed in NYC Open Data
+                            // Update status and description if changed in NYC Open Data, ensuring unitId is valid
                             await database_1.default.violation.update({
                                 where: { id: existing.id },
                                 data: {
+                                    unitId: targetUnit.id,
                                     status: item.status,
                                     description: item.description,
                                 },
@@ -1663,10 +1705,11 @@ class PortalController {
                             syncedForThisProp++;
                         }
                         else {
-                            // Update compliance status if updated by NYC Dept of Buildings
+                            // Update compliance status if updated by NYC Dept of Buildings, ensuring unitId is valid
                             await database_1.default.violation.update({
                                 where: { id: existing.id },
                                 data: {
+                                    unitId: targetUnit.id,
                                     status: item.status,
                                     description: item.description,
                                 },
