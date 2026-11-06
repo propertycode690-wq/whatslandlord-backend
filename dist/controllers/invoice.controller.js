@@ -29,7 +29,7 @@ class InvoiceController {
                     propertyId: { in: activePropIds },
                     tenant: {
                         companyId,
-                        status: { notIn: ['Deleted', 'Inactive'] },
+                        status: { not: 'Inactive' },
                     },
                 };
             }

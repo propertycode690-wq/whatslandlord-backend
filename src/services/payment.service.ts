@@ -270,7 +270,7 @@ export class PaymentService {
         companyId,
         tenant: {
           companyId,
-          status: { notIn: ['Deleted', 'Inactive'] },
+          status: { not: 'Inactive' },
         },
       };
     }

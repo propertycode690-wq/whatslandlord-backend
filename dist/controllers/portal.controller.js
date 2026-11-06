@@ -1843,7 +1843,7 @@ class PortalController {
                     companyId,
                     tenant: {
                         companyId,
-                        status: { notIn: ['Deleted', 'Inactive'] },
+                        status: { not: 'Inactive' },
                     },
                 };
             }
@@ -1960,7 +1960,7 @@ class PortalController {
                     companyId,
                     tenant: {
                         companyId,
-                        status: { notIn: ['Deleted', 'Inactive'] },
+                        status: { not: 'Inactive' },
                     },
                 };
             }
@@ -2024,7 +2024,7 @@ class PortalController {
                     companyId,
                     tenant: {
                         companyId,
-                        status: { notIn: ['Deleted', 'Inactive'] },
+                        status: { not: 'Inactive' },
                     },
                 };
             }
