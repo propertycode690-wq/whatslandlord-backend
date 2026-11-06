@@ -11,8 +11,11 @@ class ServiceRequestController {
     async getAll(req, res, next) {
         try {
             const companyId = req.user?.companyId;
+            if (!companyId) {
+                return (0, apiResponse_1.sendSuccess)({ res, data: [] });
+            }
             let requests = await database_1.default.serviceRequest.findMany({
-                where: companyId ? { companyId } : {},
+                where: { companyId },
                 orderBy: { createdAt: 'desc' },
             });
             const formatted = requests.map((r, index) => ({
@@ -39,8 +42,11 @@ class ServiceRequestController {
         try {
             const id = req.params.id;
             const companyId = req.user?.companyId;
+            if (!companyId) {
+                return res.status(404).json({ success: false, error: { message: 'Service request not found' } });
+            }
             const request = await database_1.default.serviceRequest.findFirst({
-                where: companyId ? { id, companyId } : { id },
+                where: { id, companyId },
             });
             if (!request) {
                 return res.status(404).json({ success: false, error: { message: 'Service request not found' } });

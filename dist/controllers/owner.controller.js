@@ -14,6 +14,9 @@ class OwnerController {
     async getAll(req, res, next) {
         try {
             const companyId = req.user?.companyId;
+            if (!companyId && req.user?.roleName !== 'SuperAdmin' && req.user?.role !== 'SuperAdmin') {
+                return (0, apiResponse_js_1.sendSuccess)({ res, data: [] });
+            }
             const owners = await database_js_1.default.owner.findMany({
                 where: companyId ? { companyId } : {},
                 include: {

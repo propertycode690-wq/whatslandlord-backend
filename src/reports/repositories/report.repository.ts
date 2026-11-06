@@ -1204,13 +1204,13 @@ export class ReportRepository {
         const skip = (page - 1) * limit;
         const [exports, totalRecords] = await Promise.all([
           (prisma as any).reportExport.findMany({
-            where: companyId ? { OR: [{ companyId }, { companyId: null }] } : {},
+            where: companyId ? { companyId } : {},
             orderBy: { createdAt: 'desc' },
             skip,
             take: limit,
           }),
           (prisma as any).reportExport.count({
-            where: companyId ? { OR: [{ companyId }, { companyId: null }] } : {},
+            where: companyId ? { companyId } : {},
           }),
         ]);
         if (exports && exports.length > 0) {

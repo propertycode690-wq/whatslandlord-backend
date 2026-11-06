@@ -6,49 +6,156 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.ReportRepository = void 0;
 const database_1 = __importDefault(require("../../config/database"));
 class ReportRepository {
+    // Helper: Fetch soft-deleted entity IDs from restore_bin so soft-deleted records are never counted
+    async getSoftDeletedIds(companyId) {
+        const result = {
+            properties: [],
+            units: [],
+            leases: [],
+            tenants: [],
+            invoices: [],
+            payments: [],
+            workOrders: [],
+            serviceRequests: [],
+        };
+        try {
+            const rows = await database_1.default.$queryRawUnsafe(`SELECT entityType, entityId FROM restore_bin ${companyId ? 'WHERE companyId = ? OR companyId IS NULL' : ''}`, ...(companyId ? [companyId] : []));
+            for (const r of rows || []) {
+                const type = String(r.entityType || '').toLowerCase().replace(/[\s_-]/g, '');
+                const id = String(r.entityId || '');
+                if (!id)
+                    continue;
+                if (type === 'property')
+                    result.properties.push(id);
+                else if (type === 'unit')
+                    result.units.push(id);
+                else if (type === 'lease')
+                    result.leases.push(id);
+                else if (type === 'tenant')
+                    result.tenants.push(id);
+                else if (type === 'invoice')
+                    result.invoices.push(id);
+                else if (type === 'payment' || type === 'rentpayment')
+                    result.payments.push(id);
+                else if (type === 'workorder')
+                    result.workOrders.push(id);
+                else if (type === 'servicerequest')
+                    result.serviceRequests.push(id);
+            }
+        }
+        catch {
+            // restore_bin table may not exist yet; ignore safely
+        }
+        return result;
+    }
     // 1. Rent Roll Report Data
     async getRentRollData(params) {
         const { propertyIds, propertyId, unitId, tenantId, leaseStatus, startDate, endDate, search, page, limit, sortBy, sortOrder = 'asc' } = params;
-        const activePropertyIds = propertyId ? [propertyId] : propertyIds;
+        const softDeleted = await this.getSoftDeletedIds(params.companyId);
+        const activePropertyIds = (propertyId ? propertyIds.filter((id) => id === propertyId) : propertyIds).filter((id) => !softDeleted.properties.includes(id));
         if (activePropertyIds.length === 0) {
-            return { units: [], totalRecords: 0, summary: { totalMonthlyRent: 0, totalSecurityDeposits: 0, occupiedCount: 0, vacantCount: 0, totalUnits: 0 } };
+            return {
+                units: [],
+                totalRecords: 0,
+                summary: {
+                    totalMonthlyRent: 0,
+                    totalPotentialRent: 0,
+                    totalVacancyLoss: 0,
+                    totalSecurityDeposits: 0,
+                    occupiedCount: 0,
+                    vacantCount: 0,
+                    totalUnits: 0,
+                },
+            };
         }
-        // 1. Build whereClause for filtered list of units
+        // 1. Build whereClause for filtered list of active, non-deleted units
         const whereClause = {
             propertyId: { in: activePropertyIds },
+            ...(softDeleted.units.length > 0 ? { id: { notIn: softDeleted.units } } : {}),
             property: {
-                status: { notIn: ['Inactive', 'Deleted'] },
+                status: { notIn: ['Inactive', 'Deleted', 'Draft'] },
                 ...(params.companyId ? { companyId: params.companyId } : {}),
             },
         };
         if (unitId) {
+            if (softDeleted.units.includes(unitId)) {
+                return {
+                    units: [],
+                    totalRecords: 0,
+                    summary: {
+                        totalMonthlyRent: 0,
+                        totalPotentialRent: 0,
+                        totalVacancyLoss: 0,
+                        totalSecurityDeposits: 0,
+                        occupiedCount: 0,
+                        vacantCount: 0,
+                        totalUnits: 0,
+                    },
+                };
+            }
             whereClause.id = unitId;
         }
         if (tenantId) {
             whereClause.OR = [
-                { tenants: { some: { id: tenantId } } },
-                { leases: { some: { tenantId } } },
+                { tenants: { some: { id: tenantId, status: { not: 'Inactive' } } } },
+                { leases: { some: { tenantId, status: { notIn: ['Terminated', 'Cancelled'] } } } },
             ];
         }
         if (leaseStatus) {
             const ls = leaseStatus.toLowerCase().trim();
             if (ls === 'active' || ls === 'occupied') {
                 whereClause.OR = [
-                    { leases: { some: { status: 'Active' } } },
-                    { status: 'Occupied' },
+                    {
+                        leases: {
+                            some: {
+                                status: 'Active',
+                                ...(softDeleted.leases.length > 0 ? { id: { notIn: softDeleted.leases } } : {}),
+                            },
+                        },
+                    },
+                    {
+                        status: 'Occupied',
+                        tenants: {
+                            some: {
+                                status: 'Active',
+                                ...(softDeleted.tenants.length > 0 ? { id: { notIn: softDeleted.tenants } } : {}),
+                            },
+                        },
+                    },
                 ];
             }
             else if (ls === 'vacant') {
                 whereClause.AND = [
-                    { leases: { none: { status: 'Active' } } },
-                    { status: { not: 'Occupied' } },
+                    {
+                        leases: {
+                            none: {
+                                status: 'Active',
+                                ...(softDeleted.leases.length > 0 ? { id: { notIn: softDeleted.leases } } : {}),
+                            },
+                        },
+                    },
+                    {
+                        OR: [
+                            { status: { not: 'Occupied' } },
+                            { tenants: { none: { status: 'Active' } } },
+                        ],
+                    },
                 ];
             }
-            else if (ls === 'pending' || ls === 'pending_move_in') {
-                whereClause.leases = { some: { status: 'Pending_Move_In' } };
+            else if (ls === 'pending' || ls === 'pending_move_in' || ls === 'pending move in' || ls === 'reserved') {
+                whereClause.OR = [
+                    { leases: { some: { status: 'Pending_Move_In' } } },
+                    { status: 'Reserved' },
+                ];
             }
-            else if (ls === 'ended' || ls === 'expired' || ls === 'terminated') {
-                whereClause.leases = { some: { status: { in: ['Ended', 'Expired', 'Terminated'] } } };
+            else if (ls === 'ended' || ls === 'expired' || ls === 'terminated' || ls === 'draft') {
+                const targetStatus = leaseStatus.charAt(0).toUpperCase() + leaseStatus.slice(1).toLowerCase();
+                whereClause.leases = {
+                    some: {
+                        status: targetStatus,
+                        ...(softDeleted.leases.length > 0 ? { id: { notIn: softDeleted.leases } } : {}),
+                    },
+                };
             }
             else if (ls !== 'all' && ls !== 'all statuses' && ls !== 'all_statuses') {
                 whereClause.OR = [
@@ -78,8 +185,8 @@ class ReportRepository {
             const searchConditions = [
                 { unitNumber: { contains: search } },
                 { property: { name: { contains: search } } },
-                { tenants: { some: { OR: [{ firstName: { contains: search } }, { lastName: { contains: search } }] } } },
-                { leases: { some: { tenant: { OR: [{ firstName: { contains: search } }, { lastName: { contains: search } }] } } } },
+                { tenants: { some: { status: { not: 'Inactive' }, OR: [{ firstName: { contains: search } }, { lastName: { contains: search } }] } } },
+                { leases: { some: { tenant: { status: { not: 'Inactive' }, OR: [{ firstName: { contains: search } }, { lastName: { contains: search } }] } } } },
             ];
             if (whereClause.AND) {
                 whereClause.AND.push({ OR: searchConditions });
@@ -93,22 +200,30 @@ class ReportRepository {
             { property: { name: 'asc' } },
             { unitNumber: 'asc' },
         ];
-        if (sortBy === 'rentAmount')
+        if (sortBy === 'rentAmount' || sortBy === 'monthlyRent' || sortBy === 'potentialRent')
             orderBy = { rentAmount: sortOrder };
         if (sortBy === 'securityDeposit')
             orderBy = { securityDeposit: sortOrder };
         if (sortBy === 'unitNumber')
             orderBy = { unitNumber: sortOrder };
+        const leaseWhereFilter = {
+            ...(params.companyId ? { companyId: params.companyId } : {}),
+            ...(softDeleted.leases.length > 0 ? { id: { notIn: softDeleted.leases } } : {}),
+        };
+        const tenantCompanyFilter = {
+            ...(params.companyId ? { companyId: params.companyId } : {}),
+        };
         const [rawUnits, totalRecords, summaryUnits] = await Promise.all([
             database_1.default.unit.findMany({
                 where: whereClause,
                 include: {
                     property: true,
-                    tenants: true,
+                    tenants: {
+                        where: tenantCompanyFilter,
+                    },
                     leases: {
-                        where: { status: 'Active' },
+                        where: leaseWhereFilter,
                         orderBy: { startDate: 'desc' },
-                        take: 1,
                     },
                 },
                 orderBy,
@@ -118,11 +233,12 @@ class ReportRepository {
                 const fallbackUnits = await database_1.default.unit.findMany({
                     where: whereClause,
                     include: {
-                        tenants: true,
+                        tenants: {
+                            where: tenantCompanyFilter,
+                        },
                         leases: {
-                            where: { status: 'Active' },
+                            where: leaseWhereFilter,
                             orderBy: { startDate: 'desc' },
-                            take: 1,
                         },
                     },
                     orderBy,
@@ -141,52 +257,110 @@ class ReportRepository {
             database_1.default.unit.findMany({
                 where: whereClause,
                 include: {
+                    tenants: {
+                        where: tenantCompanyFilter,
+                    },
                     leases: {
-                        where: { status: 'Active' },
+                        where: leaseWhereFilter,
                         orderBy: { startDate: 'desc' },
-                        take: 1,
                     },
                 },
             }),
         ]);
-        const leaseTenantIds = Array.from(new Set(rawUnits
+        const allLeaseTenantIds = Array.from(new Set([...rawUnits, ...summaryUnits]
             .flatMap((u) => u.leases || [])
             .map((l) => l.tenantId)
-            .filter(Boolean)));
-        const leaseTenants = leaseTenantIds.length
-            ? await database_1.default.tenant.findMany({ where: { id: { in: leaseTenantIds } } })
+            .filter((id) => Boolean(id) && !softDeleted.tenants.includes(String(id)))));
+        const leaseTenants = allLeaseTenantIds.length
+            ? await database_1.default.tenant.findMany({
+                where: {
+                    id: { in: allLeaseTenantIds },
+                    ...(params.companyId ? { companyId: params.companyId } : {}),
+                    status: { notIn: ['Inactive'] },
+                },
+            })
             : [];
         const leaseTenantMap = new Map(leaseTenants.map((t) => [t.id, t]));
-        const units = rawUnits.map((u) => ({
-            ...u,
-            leases: (u.leases || []).map((l) => ({
+        // Auto-clean orphaned active leases whose tenant was deleted or soft-deleted
+        const orphanedLeaseIds = [...rawUnits, ...summaryUnits]
+            .flatMap((u) => u.leases || [])
+            .filter((l) => l.status === 'Active' && (!l.tenantId || !leaseTenantMap.has(l.tenantId)))
+            .map((l) => l.id);
+        if (orphanedLeaseIds.length > 0) {
+            await database_1.default.lease
+                .updateMany({
+                where: { id: { in: Array.from(new Set(orphanedLeaseIds)) } },
+                data: { status: 'Ended' },
+            })
+                .catch(() => { });
+        }
+        const ghostOccupiedUnitIds = [];
+        const units = rawUnits.map((u) => {
+            const validTenants = (u.tenants || []).filter((t) => t && t.status === 'Active' && !softDeleted.tenants.includes(t.id));
+            const validLeases = (u.leases || [])
+                .filter((l) => l.tenantId && leaseTenantMap.has(l.tenantId) && !softDeleted.leases.includes(l.id))
+                .map((l) => ({
                 ...l,
-                tenant: (l.tenantId && leaseTenantMap.get(l.tenantId)) || null,
-            })),
-        }));
+                tenant: leaseTenantMap.get(l.tenantId) || null,
+            }));
+            const activeLease = validLeases.find((l) => l.status === 'Active') || null;
+            const hasRealOccupant = Boolean(activeLease) || (u.status === 'Occupied' && validTenants.length > 0);
+            if (u.status === 'Occupied' && !hasRealOccupant) {
+                ghostOccupiedUnitIds.push(u.id);
+            }
+            return {
+                ...u,
+                status: hasRealOccupant ? 'Occupied' : (u.status === 'Occupied' ? 'Vacant' : u.status),
+                tenants: validTenants,
+                leases: validLeases,
+            };
+        });
+        if (ghostOccupiedUnitIds.length > 0) {
+            await database_1.default.unit
+                .updateMany({
+                where: { id: { in: Array.from(new Set(ghostOccupiedUnitIds)) } },
+                data: { status: 'Vacant' },
+            })
+                .catch(() => { });
+        }
         let totalMonthlyRent = 0;
+        let totalPotentialRent = 0;
+        let totalVacancyLoss = 0;
         let totalSecurityDeposits = 0;
         let occupiedCount = 0;
         let vacantCount = 0;
         summaryUnits.forEach((u) => {
-            const activeLease = u.leases && u.leases.length > 0 ? u.leases[0] : null;
-            const isOccupied = Boolean(activeLease) || u.status === 'Occupied';
+            const validTenants = (u.tenants || []).filter((t) => t && t.status === 'Active' && !softDeleted.tenants.includes(t.id));
+            const validLeases = (u.leases || []).filter((l) => l.tenantId && leaseTenantMap.has(l.tenantId) && !softDeleted.leases.includes(l.id));
+            const activeLease = validLeases.find((l) => l.status === 'Active') || null;
+            // Strict Occupancy Check: Unit is Occupied ONLY if it has a valid Active Lease OR (unit is Occupied AND has an Active non-deleted Tenant)
+            const isOccupied = Boolean(activeLease) || (u.status === 'Occupied' && validTenants.length > 0);
+            const unitMarketRent = Number(u.rentAmount || 0);
+            const activeRent = activeLease ? Number(activeLease.rentAmount ?? unitMarketRent) : unitMarketRent;
+            const actualMonthlyRent = isOccupied ? activeRent : 0;
+            const potentialRent = isOccupied ? activeRent : unitMarketRent;
+            const vacancyLoss = isOccupied ? 0 : unitMarketRent;
+            const depositHeld = isOccupied
+                ? Number(activeLease ? (activeLease.depositAmount ?? u.securityDeposit ?? 0) : (u.securityDeposit ?? 0))
+                : 0;
             if (isOccupied) {
                 occupiedCount++;
             }
             else {
                 vacantCount++;
             }
-            const rent = activeLease ? Number(activeLease.rentAmount || u.rentAmount || 0) : Number(u.rentAmount || 0);
-            const deposit = activeLease ? Number(activeLease.depositAmount || u.securityDeposit || 0) : Number(u.securityDeposit || 0);
-            totalMonthlyRent += rent;
-            totalSecurityDeposits += deposit;
+            totalMonthlyRent += actualMonthlyRent;
+            totalPotentialRent += potentialRent;
+            totalVacancyLoss += vacancyLoss;
+            totalSecurityDeposits += depositHeld;
         });
         return {
             units,
             totalRecords,
             summary: {
                 totalMonthlyRent,
+                totalPotentialRent,
+                totalVacancyLoss,
                 totalSecurityDeposits,
                 occupiedCount,
                 vacantCount,
@@ -272,7 +446,8 @@ class ReportRepository {
     // 3. Delinquency Report Data
     async getDelinquencyData(params) {
         const { propertyIds, propertyId, unitId, tenantId, status, startDate, endDate, page, limit, sortBy, sortOrder = 'desc' } = params;
-        const activePropertyIds = propertyId ? [propertyId] : propertyIds;
+        const softDeleted = await this.getSoftDeletedIds(params.companyId);
+        const activePropertyIds = (propertyId ? propertyIds.filter((id) => id === propertyId) : propertyIds).filter((id) => !softDeleted.properties.includes(id));
         if (activePropertyIds.length === 0) {
             return { invoices: [], totalRecords: 0, summary: { totalDelinquentBalance: 0, totalOriginalAmount: 0, totalDelinquentTenants: 0, totalDelinquentInvoices: 0, averageDaysLate: 0 } };
         }
@@ -283,6 +458,7 @@ class ReportRepository {
                     propertyId: { in: activePropertyIds },
                     ...(params.companyId ? { companyId: params.companyId } : {}),
                     ...(tenantId ? { tenantId } : {}),
+                    ...(softDeleted.invoices.length > 0 ? { id: { notIn: softDeleted.invoices } } : {}),
                 },
             });
             const propertyPayments = await database_1.default.rentPayment.findMany({
@@ -290,6 +466,7 @@ class ReportRepository {
                     propertyId: { in: activePropertyIds },
                     ...(params.companyId ? { companyId: params.companyId } : {}),
                     ...(tenantId ? { tenantId } : {}),
+                    ...(softDeleted.payments.length > 0 ? { id: { notIn: softDeleted.payments } } : {}),
                     status: { in: ['Paid', 'PartiallyPaid'] },
                 },
                 include: {
@@ -303,7 +480,7 @@ class ReportRepository {
                 const matchedPayments = propertyPayments.filter((p) => {
                     if (p.invoiceId && p.invoiceId === inv.id)
                         return true;
-                    const pMonth = p.paidDate ? new Date(p.paidDate).toISOString().slice(0, 7) : '';
+                    const pMonth = String(p.dueDate || p.paidDate || '').slice(0, 7);
                     const pTenantName = p.tenant ? `${p.tenant.firstName} ${p.tenant.lastName}` : (p.tenantName || '');
                     const tMatch = (p.tenantId && inv.tenantId && p.tenantId === inv.tenantId) ||
                         (pTenantName && inv.tenantName && pTenantName.trim().toLowerCase() === inv.tenantName.trim().toLowerCase());
@@ -335,6 +512,11 @@ class ReportRepository {
         const whereClause = {
             propertyId: { in: activePropertyIds },
             ...(params.companyId ? { companyId: params.companyId } : {}),
+            ...(softDeleted.invoices.length > 0 ? { id: { notIn: softDeleted.invoices } } : {}),
+            ...(softDeleted.tenants.length > 0 ? { tenantId: { notIn: softDeleted.tenants } } : {}),
+            tenant: {
+                status: { notIn: ['Inactive', 'Deleted'] },
+            },
         };
         if (tenantId) {
             whereClause.tenantId = tenantId;
@@ -505,32 +687,88 @@ class ReportRepository {
         }
         if (status && status !== 'All Statuses' && status !== 'all') {
             const sf = status.toLowerCase().replace(/[\s_-]/g, '');
-            let statusFilter;
+            let woStatusFilter;
+            let srStatusFilter;
             if (sf === 'inprogress' || sf === 'inprocess') {
-                statusFilter = { in: ['InProgress', 'In Progress', 'in_progress', 'IN_PROGRESS', 'Assigned', 'assigned'] };
+                woStatusFilter = 'InProgress';
+                srStatusFilter = { in: ['In Progress', 'InProgress', 'in_progress', 'IN_PROGRESS'] };
             }
-            else if (sf === 'completed' || sf === 'closed') {
-                statusFilter = { in: ['Completed', 'completed', 'Closed', 'closed'] };
+            else if (sf === 'assigned') {
+                woStatusFilter = 'Assigned';
+                srStatusFilter = { in: ['Assigned', 'assigned'] };
+            }
+            else if (sf === 'completed') {
+                woStatusFilter = 'Completed';
+                srStatusFilter = { in: ['Completed', 'completed'] };
+            }
+            else if (sf === 'closed') {
+                woStatusFilter = 'Closed';
+                srStatusFilter = { in: ['Closed', 'closed'] };
             }
             else if (sf === 'notstarted' || sf === 'open' || sf === 'new') {
-                statusFilter = { in: ['Not Started', 'not_started', 'Open', 'open', 'New', 'new', 'Pending'] };
+                woStatusFilter = 'Open';
+                srStatusFilter = { in: ['Open', 'open', 'New', 'new', 'Pending', 'Not Started'] };
             }
-            else {
-                statusFilter = { in: [status, status.toLowerCase(), status.toUpperCase()] };
+            else if (sf === 'rejected') {
+                woStatusFilter = 'Rejected';
+                srStatusFilter = { in: ['Rejected', 'rejected'] };
             }
-            woWhere.status = statusFilter;
-            srWhere.status = statusFilter;
+            else if (sf === 'cancelled') {
+                woStatusFilter = 'Cancelled';
+                srStatusFilter = { in: ['Cancelled', 'cancelled'] };
+            }
+            if (woStatusFilter) {
+                woWhere.status = woStatusFilter;
+            }
+            if (srStatusFilter) {
+                srWhere.status = srStatusFilter;
+            }
         }
         if (priority && priority !== 'All Priorities' && priority !== 'all') {
-            woWhere.priority = priority;
-            srWhere.priority = { in: [priority, priority.toLowerCase(), priority.toUpperCase()] };
+            const pClean = priority.trim();
+            const pLower = pClean.toLowerCase();
+            let woPriority = undefined;
+            let srPriorities = [];
+            if (pLower === 'low') {
+                woPriority = 'Low';
+                srPriorities = ['Low', 'low', 'LOW'];
+            }
+            else if (pLower === 'medium' || pLower === 'normal') {
+                woPriority = 'Normal';
+                srPriorities = ['Medium', 'medium', 'MEDIUM', 'Normal', 'normal', 'NORMAL'];
+            }
+            else if (pLower === 'high') {
+                woPriority = 'High';
+                srPriorities = ['High', 'high', 'HIGH'];
+            }
+            else if (pLower.includes('urgent') || pLower.includes('emergency')) {
+                woPriority = 'Emergency';
+                srPriorities = [
+                    'Urgent', 'urgent', 'URGENT',
+                    'Emergency', 'emergency', 'EMERGENCY',
+                    'Urgent / Emergency', 'urgent / emergency',
+                    'Urgent/Emergency',
+                ];
+            }
+            if (woPriority) {
+                woWhere.priority = woPriority;
+            }
+            if (srPriorities.length > 0) {
+                srWhere.priority = { in: srPriorities };
+            }
         }
         if (startDate || endDate) {
             const dateFilter = {};
-            if (startDate)
-                dateFilter.gte = startDate;
-            if (endDate)
-                dateFilter.lte = endDate;
+            if (startDate) {
+                const s = new Date(startDate);
+                s.setHours(0, 0, 0, 0);
+                dateFilter.gte = s;
+            }
+            if (endDate) {
+                const e = new Date(endDate);
+                e.setHours(23, 59, 59, 999);
+                dateFilter.lte = e;
+            }
             woWhere.createdAt = dateFilter;
             srWhere.createdAt = dateFilter;
         }
@@ -555,7 +793,7 @@ class ReportRepository {
                 propertyName: w.property?.name || w.propertyName || 'Property',
                 unitNumber: w.unitNumber || 'Unit 101',
                 title: w.title,
-                priority: w.priority || 'Medium',
+                priority: w.priority === 'Normal' ? 'Medium' : (w.priority || 'Medium'),
                 status: w.status || 'Open',
                 assignedTechnician: w.assignedTechnician || w.vendor?.contactName || 'Unassigned',
                 vendorName: w.vendor?.companyName || w.vendorName || 'Unassigned',
@@ -636,46 +874,91 @@ class ReportRepository {
     // 6. Payment History Report Data
     async getPaymentHistoryData(params) {
         const { propertyIds, propertyId, unitId, tenantId, paymentMethod, status, startDate, endDate, page, limit, sortBy, sortOrder = 'desc', } = params;
-        const activePropertyIds = propertyId ? [propertyId] : propertyIds;
+        const softDeleted = await this.getSoftDeletedIds(params.companyId);
+        const activePropertyIds = (propertyId ? propertyIds.filter((id) => id === propertyId) : propertyIds).filter((id) => !softDeleted.properties.includes(id));
         if (activePropertyIds.length === 0) {
             return { payments: [], totalRecords: 0, summary: { totalCollectedAmount: 0, totalTransactions: 0, averageTransaction: 0, methodMap: {} } };
         }
         const whereClause = {
             propertyId: { in: activePropertyIds },
+            ...(softDeleted.payments.length > 0 ? { id: { notIn: softDeleted.payments } } : {}),
+            ...(softDeleted.units.length > 0 ? { unitId: { notIn: softDeleted.units } } : {}),
+            ...(softDeleted.tenants.length > 0 ? { tenantId: { notIn: softDeleted.tenants } } : {}),
             property: {
+                status: { notIn: ['Inactive', 'Deleted', 'Draft'] },
+            },
+            tenant: {
                 status: { notIn: ['Inactive', 'Deleted'] },
             },
         };
         if (params.companyId) {
             whereClause.companyId = params.companyId;
         }
+        const andConditions = [];
         if (unitId) {
-            whereClause.OR = [
-                { unitId },
-                { tenant: { unitId } },
-            ];
+            if (softDeleted.units.includes(unitId)) {
+                return { payments: [], totalRecords: 0, summary: { totalCollectedAmount: 0, totalTransactions: 0, averageTransaction: 0, methodMap: {} } };
+            }
+            andConditions.push({
+                OR: [
+                    { unitId },
+                    { tenant: { unitId } },
+                ],
+            });
         }
         if (tenantId) {
+            if (softDeleted.tenants.includes(tenantId)) {
+                return { payments: [], totalRecords: 0, summary: { totalCollectedAmount: 0, totalTransactions: 0, averageTransaction: 0, methodMap: {} } };
+            }
             whereClause.tenantId = tenantId;
         }
-        if (paymentMethod) {
-            whereClause.paymentMethod = { in: [paymentMethod, paymentMethod.toLowerCase(), paymentMethod.toUpperCase()] };
+        if (paymentMethod && paymentMethod !== 'All Methods' && paymentMethod !== 'all') {
+            if (paymentMethod.toLowerCase().includes('offline')) {
+                whereClause.paymentMethod = { in: ['Offline', 'Offline_Partial', 'offline', 'offline_partial'] };
+            }
+            else {
+                whereClause.paymentMethod = { in: [paymentMethod, paymentMethod.toLowerCase(), paymentMethod.toUpperCase()] };
+            }
         }
-        if (status) {
-            whereClause.status = { in: [status, status.toLowerCase(), status.toUpperCase()] };
+        if (status && status !== 'All Statuses' && status !== 'all') {
+            const stNorm = status.toLowerCase().replace(/[\s_-]/g, '');
+            if (stNorm === 'partiallypaid' || stNorm === 'partial') {
+                whereClause.status = { in: ['PartiallyPaid', 'Partially Paid', 'Partial'] };
+            }
+            else if (stNorm === 'paid') {
+                whereClause.status = { in: ['Paid', 'Cleared', 'Completed'] };
+            }
+            else {
+                whereClause.status = { in: [status, status.toLowerCase(), status.toUpperCase()] };
+            }
         }
         if (startDate || endDate) {
-            whereClause.paidDate = {};
-            if (startDate)
-                whereClause.paidDate.gte = startDate;
-            if (endDate)
-                whereClause.paidDate.lte = endDate;
+            const dateCond = {};
+            if (startDate) {
+                const s = new Date(startDate);
+                s.setHours(0, 0, 0, 0);
+                dateCond.gte = s;
+            }
+            if (endDate) {
+                const e = new Date(endDate);
+                e.setHours(23, 59, 59, 999);
+                dateCond.lte = e;
+            }
+            andConditions.push({
+                OR: [
+                    { paidDate: dateCond },
+                    { dueDate: dateCond },
+                ],
+            });
+        }
+        if (andConditions.length > 0) {
+            whereClause.AND = andConditions;
         }
         const skip = (page - 1) * limit;
         let orderBy = { paidDate: sortOrder };
         if (sortBy === 'amount')
             orderBy = { amount: sortOrder };
-        const [payments, totalRecords, allPayments] = await Promise.all([
+        const [rawPayments, totalRecords, allPayments] = await Promise.all([
             database_1.default.rentPayment.findMany({
                 where: whereClause,
                 include: {
@@ -692,37 +975,27 @@ class ReportRepository {
                 where: whereClause,
             }),
         ]);
+        const payments = rawPayments.filter((p) => !(p.referenceNumber && String(p.referenceNumber).toUpperCase().startsWith('REFUND-')));
+        const validAllPayments = allPayments.filter((p) => !(p.referenceNumber && String(p.referenceNumber).toUpperCase().startsWith('REFUND-')));
         let totalCollectedAmount = 0;
         const methodMap = {};
-        allPayments.forEach((p) => {
-            if (['Paid', 'PartiallyPaid', 'Cleared'].includes(p.status) || !p.status) {
+        validAllPayments.forEach((p) => {
+            if (['Paid', 'PartiallyPaid', 'Partially Paid', 'Cleared', 'Completed'].includes(p.status) || !p.status) {
                 const amt = Number(p.amount || 0);
                 totalCollectedAmount += amt;
             }
-            const m = p.paymentMethod || 'ACH';
+            const m = p.paymentMethod || 'Offline';
             methodMap[m] = (methodMap[m] || 0) + 1;
         });
-        // If rentPayment is empty, aggregate paid invoices
-        if (allPayments.length === 0) {
-            const paidInvoices = await database_1.default.invoice.findMany({
-                where: {
-                    propertyId: { in: activePropertyIds },
-                    status: { in: ['Paid', 'Partially Paid'] },
-                },
-            });
-            paidInvoices.forEach((inv) => {
-                totalCollectedAmount += Number(inv.paidAmount || inv.amount || 0);
-            });
-        }
-        const averageTransaction = allPayments.length > 0
-            ? Math.round(totalCollectedAmount / allPayments.length)
+        const averageTransaction = validAllPayments.length > 0
+            ? Math.round(totalCollectedAmount / validAllPayments.length)
             : 0;
         return {
             payments,
-            totalRecords,
+            totalRecords: validAllPayments.length,
             summary: {
                 totalCollectedAmount,
-                totalTransactions: totalRecords || allPayments.length,
+                totalTransactions: validAllPayments.length,
                 averageTransaction,
                 methodMap,
             },
@@ -757,13 +1030,13 @@ class ReportRepository {
                 const skip = (page - 1) * limit;
                 const [exports, totalRecords] = await Promise.all([
                     database_1.default.reportExport.findMany({
-                        where: companyId ? { OR: [{ companyId }, { companyId: null }] } : {},
+                        where: companyId ? { companyId } : {},
                         orderBy: { createdAt: 'desc' },
                         skip,
                         take: limit,
                     }),
                     database_1.default.reportExport.count({
-                        where: companyId ? { OR: [{ companyId }, { companyId: null }] } : {},
+                        where: companyId ? { companyId } : {},
                     }),
                 ]);
                 if (exports && exports.length > 0) {

@@ -9,13 +9,16 @@ const auditHelper_1 = require("../utils/auditHelper");
 const appError_1 = require("../utils/appError");
 class LeaseService {
     async getAllLeases(companyId) {
+        if (!companyId)
+            return [];
         try {
             return await database_1.default.lease.findMany({
                 where: {
                     property: {
                         status: { notIn: ['Inactive', 'Deleted'] },
+                        companyId,
                     },
-                    ...(companyId ? { companyId } : {}),
+                    companyId,
                 },
                 include: {
                     tenant: true,

@@ -4,13 +4,15 @@ import { AppError } from '../utils/appError';
 
 export class LeaseService {
   async getAllLeases(companyId?: string) {
+    if (!companyId) return [];
     try {
       return await prisma.lease.findMany({
         where: {
           property: {
             status: { notIn: ['Inactive', 'Deleted'] },
+            companyId,
           },
-          ...(companyId ? { companyId } : {}),
+          companyId,
         },
         include: {
           tenant: true,

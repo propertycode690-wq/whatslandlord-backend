@@ -11,6 +11,9 @@ export class OwnerController {
   async getAll(req: AuthenticatedRequest, res: Response, next: NextFunction) {
     try {
       const companyId = req.user?.companyId;
+      if (!companyId && req.user?.roleName !== 'SuperAdmin' && (req.user as any)?.role !== 'SuperAdmin') {
+        return sendSuccess({ res, data: [] });
+      }
       const owners = await prisma.owner.findMany({
         where: companyId ? { companyId } : {},
         include: {

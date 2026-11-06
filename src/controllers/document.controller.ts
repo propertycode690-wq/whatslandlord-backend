@@ -179,7 +179,7 @@ export class DocumentController {
 
       const whereClause: any = {};
       if (companyId) {
-        whereClause.OR = [{ companyId }, { companyId: null }];
+        whereClause.companyId = companyId;
       }
       if (requestedTenantId) {
         whereClause.tenantId = requestedTenantId;

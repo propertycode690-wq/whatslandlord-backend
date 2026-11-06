@@ -15,8 +15,14 @@ class TenantController {
     async getAll(req, res, next) {
         try {
             const companyId = req.user?.companyId;
+            if (!companyId && req.user?.roleName !== 'SuperAdmin' && req.user?.role !== 'SuperAdmin') {
+                return (0, apiResponse_js_1.sendSuccess)({ res, data: [] });
+            }
             const tenants = await database_js_1.default.tenant.findMany({
-                where: companyId ? { companyId } : {},
+                where: {
+                    ...(companyId ? { companyId } : {}),
+                    status: { not: 'Inactive' },
+                },
                 include: {
                     unit: {
                         include: {
@@ -335,6 +341,12 @@ class TenantController {
                     where: { tenantId: id },
                 });
                 await tx.insurancePolicy.deleteMany({
+                    where: { tenantId: id },
+                });
+                await tx.tenantDocument.deleteMany({
+                    where: { tenantId: id },
+                });
+                await tx.serviceRequest.deleteMany({
                     where: { tenantId: id },
                 });
                 // 6. Delete login user safely

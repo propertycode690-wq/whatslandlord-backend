@@ -11,10 +11,30 @@ const companyHelper_1 = require("../utils/companyHelper");
 const crypto_1 = require("../utils/crypto");
 class PropertyService {
     async getAllProperties(companyId, user) {
+        if (!companyId && user?.roleName !== 'SuperAdmin' && user?.role !== 'SuperAdmin') {
+            if ((user?.roleName === 'Owner' || user?.role === 'Owner') && user?.email) {
+                const owner = await database_1.default.owner.findFirst({
+                    where: { email: user.email },
+                });
+                if (owner) {
+                    const properties = await database_1.default.property.findMany({
+                        where: { ownerId: owner.id, status: { notIn: ['Inactive', 'Deleted'] } },
+                        include: { owner: true, buildings: true, units: true },
+                    });
+                    return properties.map((p) => ({
+                        ...p,
+                        hasPaymentToken: !!p.encryptedPaymentToken,
+                        encryptedPaymentToken: undefined,
+                        paymentTokenIv: undefined,
+                    }));
+                }
+            }
+            return [];
+        }
         let whereClause = companyId ? { companyId, status: { notIn: ['Inactive', 'Deleted'] } } : { status: { notIn: ['Inactive', 'Deleted'] } };
         if ((user?.roleName === 'Owner' || user?.role === 'Owner') && user?.email) {
             const owner = await database_1.default.owner.findFirst({
-                where: { email: user.email },
+                where: { email: user.email, ...(companyId ? { companyId } : {}) },
             });
             if (owner) {
                 whereClause.ownerId = owner.id;
@@ -478,7 +498,9 @@ class PropertyService {
         }
         // Permanent delete
         return await database_1.default.$transaction(async (tx) => {
+            await tx.invoice.deleteMany({ where: { propertyId: id } });
             await tx.rentPayment.deleteMany({ where: { propertyId: id } });
+            await tx.ownerDocument.deleteMany({ where: { propertyId: id } });
             await tx.lease.deleteMany({ where: { propertyId: id } });
             await tx.workOrder.deleteMany({ where: { propertyId: id } });
             await tx.unit.deleteMany({ where: { propertyId: id } });

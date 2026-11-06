@@ -32,6 +32,12 @@ export async function generateAutoInvoices() {
     const activeLeases = await prisma.lease.findMany({
       where: {
         status: 'Active',
+        tenant: {
+          status: { not: 'Inactive' },
+        },
+        property: {
+          status: { notIn: ['Deleted', 'Inactive'] },
+        },
       },
       include: {
         tenant: true,
@@ -145,6 +151,9 @@ export async function generateAutoLateFees() {
       where: {
         balance: { gt: 0 },
         status: { notIn: ['Paid', 'Cancelled'] },
+        tenant: {
+          status: { not: 'Inactive' },
+        },
       },
       include: {
         tenant: {

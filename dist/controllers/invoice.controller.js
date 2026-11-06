@@ -21,9 +21,16 @@ class InvoiceController {
                     select: { id: true },
                 });
                 const activePropIds = activeProps.map((p) => p.id);
+                if (activePropIds.length === 0) {
+                    return (0, apiResponse_1.sendSuccess)({ res, data: [] });
+                }
                 whereClause = {
                     companyId,
-                    ...(activePropIds.length > 0 ? { propertyId: { in: activePropIds } } : {}),
+                    propertyId: { in: activePropIds },
+                    tenant: {
+                        companyId,
+                        status: { notIn: ['Deleted', 'Inactive'] },
+                    },
                 };
             }
             if (userRole === 'Tenant' && userEmail) {
@@ -185,7 +192,7 @@ class InvoiceController {
     async update(req, res, next) {
         try {
             const id = req.params.id;
-            const { status, paidAmount, balance, notes } = req.body;
+            const { status, amount, paidAmount, balance, notes, lineItems, dueDate } = req.body;
             const companyId = req.user?.companyId;
             if (companyId) {
                 const check = await database_1.default.invoice.findFirst({
@@ -198,9 +205,14 @@ class InvoiceController {
                 where: { id },
                 data: {
                     ...(status && { status }),
+                    ...(amount !== undefined && { amount: parseFloat(amount) }),
                     ...(paidAmount !== undefined && { paidAmount: parseFloat(paidAmount) }),
                     ...(balance !== undefined && { balance: parseFloat(balance) }),
                     ...(notes !== undefined && { notes }),
+                    ...(dueDate !== undefined && { dueDate: String(dueDate) }),
+                    ...(lineItems !== undefined && {
+                        lineItems: typeof lineItems === 'string' ? lineItems : JSON.stringify(lineItems),
+                    }),
                 },
             });
             return (0, apiResponse_1.sendSuccess)({

@@ -11,6 +11,9 @@ class UnitController {
     async getAll(req, res, next) {
         try {
             const companyId = req.user?.companyId;
+            if (!companyId && req.user?.roleName !== 'SuperAdmin' && req.user?.role !== 'SuperAdmin') {
+                return (0, apiResponse_1.sendSuccess)({ res, data: [] });
+            }
             const units = await database_1.default.unit.findMany({
                 where: {
                     property: {
@@ -247,18 +250,21 @@ class UnitController {
         try {
             const id = req.params.id;
             const companyId = req.user?.companyId;
-            if (companyId) {
-                const check = await database_1.default.unit.findFirst({
-                    where: {
-                        id,
-                        property: { companyId },
-                    },
-                });
-                if (!check)
-                    throw new appError_1.AppError('Unit not found.', 404, 'NOT_FOUND');
-            }
-            await database_1.default.unit.delete({
-                where: { id },
+            const check = await database_1.default.unit.findFirst({
+                where: {
+                    id,
+                    ...(companyId ? { property: { companyId } } : {}),
+                },
+            });
+            if (!check)
+                throw new appError_1.AppError('Unit not found.', 404, 'NOT_FOUND');
+            await database_1.default.$transaction(async (tx) => {
+                await tx.invoice.deleteMany({ where: { unitNumber: check?.unitNumber, propertyId: check?.propertyId } });
+                await tx.rentPayment.deleteMany({ where: { unitId: id } });
+                await tx.moveIn.deleteMany({ where: { unitId: id } });
+                await tx.moveOut.deleteMany({ where: { unitId: id } });
+                await tx.lease.deleteMany({ where: { unitId: id } });
+                await tx.unit.delete({ where: { id } });
             });
             return (0, apiResponse_1.sendSuccess)({ res, data: { success: true } });
         }

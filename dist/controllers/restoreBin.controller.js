@@ -199,7 +199,7 @@ class RestoreBinController {
             await RestoreBinController.ensureTable();
             const id = req.params.id;
             const companyId = req.user?.companyId;
-            const items = await database_1.default.$queryRawUnsafe(`SELECT * FROM restore_bin WHERE id = ? ${companyId ? 'AND (companyId = ? OR companyId IS NULL)' : ''} LIMIT 1`, ...(companyId ? [id, companyId] : [id]));
+            const items = await database_1.default.$queryRawUnsafe(`SELECT * FROM restore_bin WHERE id = ? ${companyId ? 'AND companyId = ?' : 'AND companyId IS NULL'} LIMIT 1`, ...(companyId ? [id, companyId] : [id]));
             if (!items || items.length === 0) {
                 throw new appError_1.AppError('Item not found in Restore Bin', 404);
             }

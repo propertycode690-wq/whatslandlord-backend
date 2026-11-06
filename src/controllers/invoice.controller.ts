@@ -25,9 +25,16 @@ class InvoiceController {
           select: { id: true },
         });
         const activePropIds = activeProps.map((p) => p.id);
+        if (activePropIds.length === 0) {
+          return sendSuccess({ res, data: [] });
+        }
         whereClause = {
           companyId,
-          ...(activePropIds.length > 0 ? { propertyId: { in: activePropIds } } : {}),
+          propertyId: { in: activePropIds },
+          tenant: {
+            companyId,
+            status: { notIn: ['Deleted', 'Inactive'] },
+          },
         };
       }
 

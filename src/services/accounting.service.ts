@@ -3,8 +3,9 @@ import { AppError } from '../utils/appError';
 
 export class AccountingService {
   async getChartOfAccounts(companyId?: string) {
+    if (!companyId) return [];
     const accounts = await prisma.coAAccount.findMany({
-      where: companyId ? { companyId } : {},
+      where: { companyId },
       orderBy: { accountCode: 'asc' },
     });
     return accounts;
@@ -42,8 +43,9 @@ export class AccountingService {
   }
 
   async getJournalEntries(companyId?: string) {
+    if (!companyId) return [];
     const entries = await prisma.journalEntry.findMany({
-      where: companyId ? { companyId } : {},
+      where: { companyId },
       include: {
         lines: {
           include: {
@@ -57,10 +59,11 @@ export class AccountingService {
   }
 
   async getGeneralLedger(companyId?: string) {
+    if (!companyId) return [];
     const ledger = await prisma.journalEntryLine.findMany({
-      where: companyId ? {
+      where: {
         journalEntry: { companyId }
-      } : {},
+      },
       include: {
         account: true,
         journalEntry: true,
@@ -75,8 +78,9 @@ export class AccountingService {
   }
 
   async getBankAccounts(companyId?: string) {
+    if (!companyId) return [];
     const accounts = await prisma.bankAccount.findMany({
-      where: companyId ? { companyId } : {},
+      where: { companyId },
       orderBy: { name: 'asc' },
     });
     return accounts;

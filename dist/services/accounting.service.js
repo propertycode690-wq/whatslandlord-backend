@@ -8,8 +8,10 @@ const database_1 = __importDefault(require("../config/database"));
 const appError_1 = require("../utils/appError");
 class AccountingService {
     async getChartOfAccounts(companyId) {
+        if (!companyId)
+            return [];
         const accounts = await database_1.default.coAAccount.findMany({
-            where: companyId ? { companyId } : {},
+            where: { companyId },
             orderBy: { accountCode: 'asc' },
         });
         return accounts;
@@ -45,8 +47,10 @@ class AccountingService {
         });
     }
     async getJournalEntries(companyId) {
+        if (!companyId)
+            return [];
         const entries = await database_1.default.journalEntry.findMany({
-            where: companyId ? { companyId } : {},
+            where: { companyId },
             include: {
                 lines: {
                     include: {
@@ -59,10 +63,12 @@ class AccountingService {
         return entries;
     }
     async getGeneralLedger(companyId) {
+        if (!companyId)
+            return [];
         const ledger = await database_1.default.journalEntryLine.findMany({
-            where: companyId ? {
+            where: {
                 journalEntry: { companyId }
-            } : {},
+            },
             include: {
                 account: true,
                 journalEntry: true,
@@ -76,8 +82,10 @@ class AccountingService {
         return ledger;
     }
     async getBankAccounts(companyId) {
+        if (!companyId)
+            return [];
         const accounts = await database_1.default.bankAccount.findMany({
-            where: companyId ? { companyId } : {},
+            where: { companyId },
             orderBy: { name: 'asc' },
         });
         return accounts;

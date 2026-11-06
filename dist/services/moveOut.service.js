@@ -18,7 +18,6 @@ class MoveOutService {
                         ? {
                             OR: [
                                 { companyId },
-                                { companyId: null },
                                 { property: { companyId } },
                             ],
                         }
@@ -47,7 +46,6 @@ class MoveOutService {
             ? {
                 OR: [
                     { companyId },
-                    { companyId: null },
                     { lease: { companyId } },
                     { unit: { property: { companyId } } },
                 ],
@@ -115,7 +113,6 @@ class MoveOutService {
             ? {
                 OR: [
                     { companyId },
-                    { companyId: null },
                     { lease: { companyId } },
                     { unit: { property: { companyId } } },
                 ],
@@ -346,7 +343,6 @@ class MoveOutService {
             ? {
                 OR: [
                     { companyId },
-                    { companyId: null },
                     { lease: { companyId } },
                     { unit: { property: { companyId } } },
                 ],
@@ -414,7 +410,6 @@ class MoveOutService {
             ? {
                 OR: [
                     { companyId },
-                    { companyId: null },
                     { lease: { companyId } },
                     { unit: { property: { companyId } } },
                 ],

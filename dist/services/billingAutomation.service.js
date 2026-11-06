@@ -39,6 +39,12 @@ async function generateAutoInvoices() {
         const activeLeases = await database_1.default.lease.findMany({
             where: {
                 status: 'Active',
+                tenant: {
+                    status: { not: 'Inactive' },
+                },
+                property: {
+                    status: { notIn: ['Deleted', 'Inactive'] },
+                },
             },
             include: {
                 tenant: true,
@@ -139,6 +145,9 @@ async function generateAutoLateFees() {
             where: {
                 balance: { gt: 0 },
                 status: { notIn: ['Paid', 'Cancelled'] },
+                tenant: {
+                    status: { not: 'Inactive' },
+                },
             },
             include: {
                 tenant: {

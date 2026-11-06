@@ -8,17 +8,20 @@ export class WorkOrderController {
   async getAll(req: AuthenticatedRequest, res: Response, next: NextFunction) {
     try {
       const companyId = req.user?.companyId;
+      if (!companyId) {
+        return sendSuccess({ res, data: [] });
+      }
 
       // 1. Fetch WorkOrders
       const workOrders = await prisma.workOrder.findMany({
-        where: companyId ? { companyId } : {},
+        where: { companyId },
         include: { property: true, vendor: true },
         orderBy: { createdAt: 'desc' },
       });
 
       // 2. Fetch ServiceRequests
       const serviceRequests = await prisma.serviceRequest.findMany({
-        where: companyId ? { companyId } : {},
+        where: { companyId },
         orderBy: { createdAt: 'desc' },
       });
 
@@ -89,8 +92,12 @@ export class WorkOrderController {
       const id = req.params['id'] as string;
       const companyId = req.user?.companyId;
 
+      if (!companyId) {
+        return res.status(404).json({ message: 'Work order not found.' });
+      }
+
       const wo = await prisma.workOrder.findFirst({
-        where: companyId ? { id, companyId } : { id },
+        where: { id, companyId },
         include: { property: true, vendor: true },
       });
 
@@ -123,7 +130,7 @@ export class WorkOrderController {
       }
 
       const sr = await prisma.serviceRequest.findFirst({
-        where: companyId ? { id, companyId } : { id },
+        where: { id, companyId },
       });
 
       if (sr) {

@@ -11,15 +11,18 @@ class WorkOrderController {
     async getAll(req, res, next) {
         try {
             const companyId = req.user?.companyId;
+            if (!companyId) {
+                return (0, apiResponse_js_1.sendSuccess)({ res, data: [] });
+            }
             // 1. Fetch WorkOrders
             const workOrders = await database_js_1.default.workOrder.findMany({
-                where: companyId ? { companyId } : {},
+                where: { companyId },
                 include: { property: true, vendor: true },
                 orderBy: { createdAt: 'desc' },
             });
             // 2. Fetch ServiceRequests
             const serviceRequests = await database_js_1.default.serviceRequest.findMany({
-                where: companyId ? { companyId } : {},
+                where: { companyId },
                 orderBy: { createdAt: 'desc' },
             });
             const formattedWorkOrders = workOrders.map((wo, index) => {
@@ -86,8 +89,11 @@ class WorkOrderController {
         try {
             const id = req.params['id'];
             const companyId = req.user?.companyId;
+            if (!companyId) {
+                return res.status(404).json({ message: 'Work order not found.' });
+            }
             const wo = await database_js_1.default.workOrder.findFirst({
-                where: companyId ? { id, companyId } : { id },
+                where: { id, companyId },
                 include: { property: true, vendor: true },
             });
             if (wo) {
@@ -118,7 +124,7 @@ class WorkOrderController {
                 });
             }
             const sr = await database_js_1.default.serviceRequest.findFirst({
-                where: companyId ? { id, companyId } : { id },
+                where: { id, companyId },
             });
             if (sr) {
                 return (0, apiResponse_js_1.sendSuccess)({
@@ -164,7 +170,7 @@ class WorkOrderController {
                     title,
                     description,
                     vendorId: vendorId || null,
-                    priority: priority || 'Normal',
+                    priority: priority === 'Medium' ? 'Normal' : (priority === 'Urgent' || priority === 'Urgent / Emergency' ? 'Emergency' : (priority || 'Normal')),
                     status: status || 'Open',
                     estimatedCost: estimatedCost ? parseFloat(estimatedCost) : null,
                     actualCost: actualCost ? parseFloat(actualCost) : null,
@@ -267,7 +273,7 @@ class WorkOrderController {
                     where: { id },
                     data: {
                         ...(finalStatus && { status: finalStatus }),
-                        ...(priority && { priority }),
+                        ...(priority && { priority: (priority === 'Medium' ? 'Normal' : (priority === 'Urgent' || priority === 'Urgent / Emergency' ? 'Emergency' : priority)) }),
                         ...(estimatedCost !== undefined && { estimatedCost: parseFloat(String(estimatedCost)) }),
                         ...(resolvedActualCost !== undefined && { actualCost: resolvedActualCost }),
                         ...(vendorId && { vendorId }),

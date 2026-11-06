@@ -226,7 +226,7 @@ export class RestoreBinController {
       const companyId = req.user?.companyId;
 
       const items: any[] = await prisma.$queryRawUnsafe(
-        `SELECT * FROM restore_bin WHERE id = ? ${companyId ? 'AND (companyId = ? OR companyId IS NULL)' : ''} LIMIT 1`,
+        `SELECT * FROM restore_bin WHERE id = ? ${companyId ? 'AND companyId = ?' : 'AND companyId IS NULL'} LIMIT 1`,
         ...(companyId ? [id, companyId] : [id])
       );
 

@@ -258,13 +258,21 @@ export class PaymentService {
     const userRole = user?.roleName || user?.role;
     if (userRole === 'Tenant' && user?.email) {
       const tenant = await prisma.tenant.findFirst({
-        where: { email: user.email },
+        where: { email: user.email, ...(companyId ? { companyId } : {}) },
       });
       if (tenant) {
-        whereClause = { tenantId: tenant.id };
+        whereClause = { tenantId: tenant.id, ...(companyId ? { companyId } : {}) };
       } else {
         return [];
       }
+    } else if (companyId) {
+      whereClause = {
+        companyId,
+        tenant: {
+          companyId,
+          status: { notIn: ['Deleted', 'Inactive'] },
+        },
+      };
     }
 
     try {

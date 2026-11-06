@@ -8,8 +8,11 @@ class ServiceRequestController {
   async getAll(req: AuthenticatedRequest, res: Response, next: NextFunction) {
     try {
       const companyId = req.user?.companyId;
+      if (!companyId) {
+        return sendSuccess({ res, data: [] });
+      }
       let requests = await prisma.serviceRequest.findMany({
-        where: companyId ? { companyId } : {},
+        where: { companyId },
         orderBy: { createdAt: 'desc' },
       });
 
@@ -35,8 +38,11 @@ class ServiceRequestController {
     try {
       const id = req.params.id as string;
       const companyId = req.user?.companyId;
+      if (!companyId) {
+        return res.status(404).json({ success: false, error: { message: 'Service request not found' } });
+      }
       const request = await prisma.serviceRequest.findFirst({
-        where: companyId ? { id, companyId } : { id },
+        where: { id, companyId },
       });
       if (!request) {
         return res.status(404).json({ success: false, error: { message: 'Service request not found' } });

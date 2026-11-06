@@ -7,8 +7,11 @@ export class ApplicationController {
   async getAll(req: AuthenticatedRequest, res: Response, next: NextFunction) {
     try {
       const companyId = req.user?.companyId;
+      if (!companyId) {
+        return sendSuccess({ res, data: [] });
+      }
       const applications = await prisma.application.findMany({
-        where: companyId ? { companyId } : {},
+        where: { companyId },
         orderBy: { submittedDate: 'desc' },
       });
       return sendSuccess({ res, data: applications });
@@ -22,8 +25,20 @@ export class ApplicationController {
 
   async create(req: AuthenticatedRequest, res: Response, next: NextFunction) {
     try {
-      const { tenantName, email, propertyName, unitNumber, rentProposed, status, submittedDate } = req.body;
-      const companyId = req.user?.companyId;
+      const { tenantName, email, propertyName, unitNumber, rentProposed, status, submittedDate, companyId: bodyCompanyId } = req.body;
+      let companyId = req.user?.companyId || bodyCompanyId;
+
+      // If applicant applies from outside without login, resolve companyId from selected property
+      if (!companyId && propertyName) {
+        const prop = await prisma.property.findFirst({
+          where: { name: propertyName },
+          select: { companyId: true },
+        });
+        if (prop?.companyId) {
+          companyId = prop.companyId;
+        }
+      }
+
       const application = await prisma.application.create({
         data: {
           tenantName,
@@ -33,7 +48,7 @@ export class ApplicationController {
           rentProposed: parseFloat(rentProposed || '0'),
           status: status || 'Pending',
           submittedDate: submittedDate ? new Date(submittedDate) : new Date(),
-          companyId,
+          companyId: companyId || null,
         },
       });
       return sendSuccess({ res, statusCode: 201, data: application });

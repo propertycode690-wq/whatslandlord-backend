@@ -12,8 +12,15 @@ export class TenantController {
   async getAll(req: AuthenticatedRequest, res: Response, next: NextFunction) {
     try {
       const companyId = req.user?.companyId;
+      if (!companyId && req.user?.roleName !== 'SuperAdmin' && (req.user as any)?.role !== 'SuperAdmin') {
+        return sendSuccess({ res, data: [] });
+      }
+
       const tenants = await prisma.tenant.findMany({
-        where: companyId ? { companyId } : {},
+        where: {
+          ...(companyId ? { companyId } : {}),
+          status: { not: 'Inactive' },
+        },
         include: {
           unit: {
             include: {
@@ -404,6 +411,12 @@ export class TenantController {
           where: { tenantId: id },
         });
         await tx.insurancePolicy.deleteMany({
+          where: { tenantId: id },
+        });
+        await tx.tenantDocument.deleteMany({
+          where: { tenantId: id },
+        });
+        await tx.serviceRequest.deleteMany({
           where: { tenantId: id },
         });
 

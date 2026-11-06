@@ -1180,8 +1180,11 @@ class PortalController {
     async getCrmLeads(req, res, next) {
         try {
             const companyId = req.user?.companyId;
+            if (!companyId) {
+                return (0, apiResponse_1.sendSuccess)({ res, data: [] });
+            }
             const leads = await database_1.default.crmLead.findMany({
-                where: companyId ? { companyId } : {},
+                where: { companyId },
                 orderBy: { createdAt: 'desc' },
             });
             return (0, apiResponse_1.sendSuccess)({ res, data: leads });
@@ -1194,6 +1197,16 @@ class PortalController {
         try {
             const { id, name, firstName, lastName, email, phone, source, budget, moveInDate, priority, assignedAgent, notes, property, companyId, status } = req.body;
             const userCompanyId = req.user?.companyId;
+            let resolvedCompanyId = companyId || userCompanyId;
+            if (!resolvedCompanyId && property) {
+                const prop = await database_1.default.property.findFirst({
+                    where: { name: property },
+                    select: { companyId: true },
+                });
+                if (prop?.companyId) {
+                    resolvedCompanyId = prop.companyId;
+                }
+            }
             if (id) {
                 const existing = await database_1.default.crmLead.findUnique({
                     where: { id },
@@ -1213,7 +1226,7 @@ class PortalController {
                             assignedAgent: assignedAgent !== undefined ? assignedAgent : undefined,
                             notes: notes !== undefined ? notes : undefined,
                             property: property !== undefined ? property : undefined,
-                            companyId: companyId || userCompanyId || undefined,
+                            companyId: resolvedCompanyId || undefined,
                         },
                     });
                     return (0, apiResponse_1.sendSuccess)({ res, data: lead });
@@ -1234,7 +1247,7 @@ class PortalController {
                     assignedAgent: assignedAgent || null,
                     notes: notes || null,
                     property: property || null,
-                    companyId: companyId || userCompanyId || null,
+                    companyId: resolvedCompanyId || null,
                 },
             });
             return (0, apiResponse_1.sendSuccess)({ res, statusCode: 201, data: lead });
@@ -1246,8 +1259,11 @@ class PortalController {
     async getScreeningReports(req, res, next) {
         try {
             const companyId = req.user?.companyId;
+            if (!companyId) {
+                return (0, apiResponse_1.sendSuccess)({ res, data: [] });
+            }
             const reports = await database_1.default.screeningReport.findMany({
-                where: companyId ? { companyId } : {},
+                where: { companyId },
                 include: {
                     tenant: {
                         include: {
@@ -1385,8 +1401,11 @@ class PortalController {
     async getViolations(req, res, next) {
         try {
             const companyId = req.user?.companyId;
+            if (!companyId) {
+                return (0, apiResponse_1.sendSuccess)({ res, data: [] });
+            }
             const violations = await database_1.default.violation.findMany({
-                where: companyId ? { companyId } : {},
+                where: { companyId },
                 include: {
                     unit: {
                         include: { property: true },
@@ -1806,15 +1825,27 @@ class PortalController {
         try {
             await (0, billingAutomation_service_1.generateAutoInvoices)();
             await (0, billingAutomation_service_1.generateAutoLateFees)();
-            let whereClause = {};
+            const companyId = req.user?.companyId;
+            let whereClause = companyId ? { companyId } : {};
             if ((req.user?.role === 'Tenant' || req.user?.roleName === 'Tenant') && req.user?.email) {
-                const tenant = await database_1.default.tenant.findFirst({ where: { email: req.user.email } });
+                const tenant = await database_1.default.tenant.findFirst({
+                    where: { email: req.user.email, ...(companyId ? { companyId } : {}) },
+                });
                 if (tenant) {
-                    whereClause.tenantId = tenant.id;
+                    whereClause = { tenantId: tenant.id, ...(companyId ? { companyId } : {}) };
                 }
                 else {
                     return (0, apiResponse_1.sendSuccess)({ res, data: [] });
                 }
+            }
+            else if (companyId) {
+                whereClause = {
+                    companyId,
+                    tenant: {
+                        companyId,
+                        status: { notIn: ['Deleted', 'Inactive'] },
+                    },
+                };
             }
             const invoices = await database_1.default.invoice.findMany({
                 where: whereClause,
@@ -1911,15 +1942,27 @@ class PortalController {
     // --- Charges ---
     async getCharges(req, res, next) {
         try {
-            let whereClause = {};
+            const companyId = req.user?.companyId;
+            let whereClause = companyId ? { companyId } : {};
             if ((req.user?.role === 'Tenant' || req.user?.roleName === 'Tenant') && req.user?.email) {
-                const tenant = await database_1.default.tenant.findFirst({ where: { email: req.user.email } });
+                const tenant = await database_1.default.tenant.findFirst({
+                    where: { email: req.user.email, ...(companyId ? { companyId } : {}) },
+                });
                 if (tenant) {
-                    whereClause.tenantId = tenant.id;
+                    whereClause = { tenantId: tenant.id, ...(companyId ? { companyId } : {}) };
                 }
                 else {
                     return (0, apiResponse_1.sendSuccess)({ res, data: [] });
                 }
+            }
+            else if (companyId) {
+                whereClause = {
+                    companyId,
+                    tenant: {
+                        companyId,
+                        status: { notIn: ['Deleted', 'Inactive'] },
+                    },
+                };
             }
             const charges = await database_1.default.charge.findMany({
                 where: whereClause,
@@ -1963,15 +2006,27 @@ class PortalController {
     // --- Deposits ---
     async getDeposits(req, res, next) {
         try {
-            let whereClause = {};
+            const companyId = req.user?.companyId;
+            let whereClause = companyId ? { companyId } : {};
             if ((req.user?.role === 'Tenant' || req.user?.roleName === 'Tenant') && req.user?.email) {
-                const tenant = await database_1.default.tenant.findFirst({ where: { email: req.user.email } });
+                const tenant = await database_1.default.tenant.findFirst({
+                    where: { email: req.user.email, ...(companyId ? { companyId } : {}) },
+                });
                 if (tenant) {
-                    whereClause.tenantId = tenant.id;
+                    whereClause = { tenantId: tenant.id, ...(companyId ? { companyId } : {}) };
                 }
                 else {
                     return (0, apiResponse_1.sendSuccess)({ res, data: [] });
                 }
+            }
+            else if (companyId) {
+                whereClause = {
+                    companyId,
+                    tenant: {
+                        companyId,
+                        status: { notIn: ['Deleted', 'Inactive'] },
+                    },
+                };
             }
             const deposits = await database_1.default.deposit.findMany({
                 where: whereClause,

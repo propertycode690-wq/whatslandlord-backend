@@ -14,7 +14,6 @@ export class MoveOutService {
             ? {
                 OR: [
                   { companyId },
-                  { companyId: null as any },
                   { property: { companyId } },
                 ],
               }
@@ -44,7 +43,6 @@ export class MoveOutService {
       ? {
           OR: [
             { companyId },
-            { companyId: null as any },
             { lease: { companyId } },
             { unit: { property: { companyId } } },
           ],
@@ -115,7 +113,6 @@ export class MoveOutService {
       ? {
           OR: [
             { companyId },
-            { companyId: null as any },
             { lease: { companyId } },
             { unit: { property: { companyId } } },
           ],
@@ -358,7 +355,6 @@ export class MoveOutService {
       ? {
           OR: [
             { companyId },
-            { companyId: null as any },
             { lease: { companyId } },
             { unit: { property: { companyId } } },
           ],
@@ -432,7 +428,6 @@ export class MoveOutService {
       ? {
           OR: [
             { companyId },
-            { companyId: null as any },
             { lease: { companyId } },
             { unit: { property: { companyId } } },
           ],

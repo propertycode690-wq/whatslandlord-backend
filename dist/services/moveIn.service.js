@@ -18,7 +18,6 @@ class MoveInService {
                         ? {
                             OR: [
                                 { companyId },
-                                { companyId: null },
                                 { property: { companyId } },
                             ],
                         }
@@ -48,7 +47,6 @@ class MoveInService {
             ? {
                 OR: [
                     { companyId },
-                    { companyId: null },
                     { lease: { companyId } },
                     { unit: { property: { companyId } } },
                 ],
@@ -93,7 +91,6 @@ class MoveInService {
             ? {
                 OR: [
                     { companyId },
-                    { companyId: null },
                     { lease: { companyId } },
                     { unit: { property: { companyId } } },
                 ],
@@ -192,7 +189,6 @@ class MoveInService {
             ? {
                 OR: [
                     { companyId },
-                    { companyId: null },
                     { lease: { companyId } },
                     { unit: { property: { companyId } } },
                 ],

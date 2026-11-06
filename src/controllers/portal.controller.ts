@@ -1233,8 +1233,11 @@ export class PortalController {
   async getCrmLeads(req: Request, res: Response, next: NextFunction) {
     try {
       const companyId = (req as AuthenticatedRequest).user?.companyId;
+      if (!companyId) {
+        return sendSuccess({ res, data: [] });
+      }
       const leads = await prisma.crmLead.findMany({
-        where: companyId ? { companyId } : {},
+        where: { companyId },
         orderBy: { createdAt: 'desc' },
       });
       return sendSuccess({ res, data: leads });
@@ -1247,6 +1250,17 @@ export class PortalController {
     try {
       const { id, name, firstName, lastName, email, phone, source, budget, moveInDate, priority, assignedAgent, notes, property, companyId, status } = req.body;
       const userCompanyId = (req as AuthenticatedRequest).user?.companyId;
+      let resolvedCompanyId = companyId || userCompanyId;
+
+      if (!resolvedCompanyId && property) {
+        const prop = await prisma.property.findFirst({
+          where: { name: property },
+          select: { companyId: true },
+        });
+        if (prop?.companyId) {
+          resolvedCompanyId = prop.companyId;
+        }
+      }
 
       if (id) {
         const existing = await prisma.crmLead.findUnique({
@@ -1267,7 +1281,7 @@ export class PortalController {
               assignedAgent: assignedAgent !== undefined ? assignedAgent : undefined,
               notes: notes !== undefined ? notes : undefined,
               property: property !== undefined ? property : undefined,
-              companyId: companyId || userCompanyId || undefined,
+              companyId: resolvedCompanyId || undefined,
             },
           });
           return sendSuccess({ res, data: lead });
@@ -1289,7 +1303,7 @@ export class PortalController {
           assignedAgent: assignedAgent || null,
           notes: notes || null,
           property: property || null,
-          companyId: companyId || userCompanyId || null,
+          companyId: resolvedCompanyId || null,
         },
       });
       return sendSuccess({ res, statusCode: 201, data: lead });
@@ -1301,8 +1315,11 @@ export class PortalController {
   async getScreeningReports(req: AuthenticatedRequest, res: Response, next: NextFunction) {
     try {
       const companyId = req.user?.companyId;
+      if (!companyId) {
+        return sendSuccess({ res, data: [] });
+      }
       const reports = await prisma.screeningReport.findMany({
-        where: companyId ? { companyId } : {},
+        where: { companyId },
         include: {
           tenant: {
             include: {
@@ -1448,8 +1465,11 @@ export class PortalController {
   async getViolations(req: AuthenticatedRequest, res: Response, next: NextFunction) {
     try {
       const companyId = req.user?.companyId;
+      if (!companyId) {
+        return sendSuccess({ res, data: [] });
+      }
       const violations = await prisma.violation.findMany({
-        where: companyId ? { companyId } : {},
+        where: { companyId },
         include: {
           unit: {
             include: { property: true },
@@ -1898,14 +1918,26 @@ export class PortalController {
       await generateAutoInvoices();
       await generateAutoLateFees();
 
-      let whereClause: any = {};
+      const companyId = req.user?.companyId;
+      let whereClause: any = companyId ? { companyId } : {};
+
       if (((req.user as any)?.role === 'Tenant' || req.user?.roleName === 'Tenant') && req.user?.email) {
-        const tenant = await prisma.tenant.findFirst({ where: { email: req.user.email } });
+        const tenant = await prisma.tenant.findFirst({
+          where: { email: req.user.email, ...(companyId ? { companyId } : {}) },
+        });
         if (tenant) {
-          whereClause.tenantId = tenant.id;
+          whereClause = { tenantId: tenant.id, ...(companyId ? { companyId } : {}) };
         } else {
           return sendSuccess({ res, data: [] });
         }
+      } else if (companyId) {
+        whereClause = {
+          companyId,
+          tenant: {
+            companyId,
+            status: { notIn: ['Deleted', 'Inactive'] },
+          },
+        };
       }
 
       const invoices = await prisma.invoice.findMany({
@@ -2009,14 +2041,26 @@ export class PortalController {
   // --- Charges ---
   async getCharges(req: AuthenticatedRequest, res: Response, next: NextFunction) {
     try {
-      let whereClause: any = {};
+      const companyId = req.user?.companyId;
+      let whereClause: any = companyId ? { companyId } : {};
+
       if (((req.user as any)?.role === 'Tenant' || req.user?.roleName === 'Tenant') && req.user?.email) {
-        const tenant = await prisma.tenant.findFirst({ where: { email: req.user.email } });
+        const tenant = await prisma.tenant.findFirst({
+          where: { email: req.user.email, ...(companyId ? { companyId } : {}) },
+        });
         if (tenant) {
-          whereClause.tenantId = tenant.id;
+          whereClause = { tenantId: tenant.id, ...(companyId ? { companyId } : {}) };
         } else {
           return sendSuccess({ res, data: [] });
         }
+      } else if (companyId) {
+        whereClause = {
+          companyId,
+          tenant: {
+            companyId,
+            status: { notIn: ['Deleted', 'Inactive'] },
+          },
+        };
       }
 
       const charges = await prisma.charge.findMany({
@@ -2061,14 +2105,26 @@ export class PortalController {
   // --- Deposits ---
   async getDeposits(req: AuthenticatedRequest, res: Response, next: NextFunction) {
     try {
-      let whereClause: any = {};
+      const companyId = req.user?.companyId;
+      let whereClause: any = companyId ? { companyId } : {};
+
       if (((req.user as any)?.role === 'Tenant' || req.user?.roleName === 'Tenant') && req.user?.email) {
-        const tenant = await prisma.tenant.findFirst({ where: { email: req.user.email } });
+        const tenant = await prisma.tenant.findFirst({
+          where: { email: req.user.email, ...(companyId ? { companyId } : {}) },
+        });
         if (tenant) {
-          whereClause.tenantId = tenant.id;
+          whereClause = { tenantId: tenant.id, ...(companyId ? { companyId } : {}) };
         } else {
           return sendSuccess({ res, data: [] });
         }
+      } else if (companyId) {
+        whereClause = {
+          companyId,
+          tenant: {
+            companyId,
+            status: { notIn: ['Deleted', 'Inactive'] },
+          },
+        };
       }
 
       const deposits = await prisma.deposit.findMany({

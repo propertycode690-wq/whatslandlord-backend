@@ -8,6 +8,10 @@ export class UnitController {
   async getAll(req: AuthenticatedRequest, res: Response, next: NextFunction) {
     try {
       const companyId = req.user?.companyId;
+      if (!companyId && req.user?.roleName !== 'SuperAdmin' && (req.user as any)?.role !== 'SuperAdmin') {
+        return sendSuccess({ res, data: [] });
+      }
+
       const units = await prisma.unit.findMany({
         where: {
           property: {
@@ -287,18 +291,21 @@ export class UnitController {
       const id = req.params.id as string;
       const companyId = req.user?.companyId;
 
-      if (companyId) {
-        const check = await prisma.unit.findFirst({
-          where: {
-            id,
-            property: { companyId },
-          },
-        });
-        if (!check) throw new AppError('Unit not found.', 404, 'NOT_FOUND');
-      }
+      const check = await prisma.unit.findFirst({
+        where: {
+          id,
+          ...(companyId ? { property: { companyId } } : {}),
+        },
+      });
+      if (!check) throw new AppError('Unit not found.', 404, 'NOT_FOUND');
 
-      await prisma.unit.delete({
-        where: { id },
+      await prisma.$transaction(async (tx) => {
+        await tx.invoice.deleteMany({ where: { unitNumber: check?.unitNumber, propertyId: check?.propertyId } });
+        await tx.rentPayment.deleteMany({ where: { unitId: id } });
+        await tx.moveIn.deleteMany({ where: { unitId: id } });
+        await tx.moveOut.deleteMany({ where: { unitId: id } });
+        await tx.lease.deleteMany({ where: { unitId: id } });
+        await tx.unit.delete({ where: { id } });
       });
       return sendSuccess({ res, data: { success: true } });
     } catch (error) {

@@ -10,8 +10,11 @@ class ApplicationController {
     async getAll(req, res, next) {
         try {
             const companyId = req.user?.companyId;
+            if (!companyId) {
+                return (0, apiResponse_1.sendSuccess)({ res, data: [] });
+            }
             const applications = await database_1.default.application.findMany({
-                where: companyId ? { companyId } : {},
+                where: { companyId },
                 orderBy: { submittedDate: 'desc' },
             });
             return (0, apiResponse_1.sendSuccess)({ res, data: applications });
@@ -23,8 +26,18 @@ class ApplicationController {
     // check
     async create(req, res, next) {
         try {
-            const { tenantName, email, propertyName, unitNumber, rentProposed, status, submittedDate } = req.body;
-            const companyId = req.user?.companyId;
+            const { tenantName, email, propertyName, unitNumber, rentProposed, status, submittedDate, companyId: bodyCompanyId } = req.body;
+            let companyId = req.user?.companyId || bodyCompanyId;
+            // If applicant applies from outside without login, resolve companyId from selected property
+            if (!companyId && propertyName) {
+                const prop = await database_1.default.property.findFirst({
+                    where: { name: propertyName },
+                    select: { companyId: true },
+                });
+                if (prop?.companyId) {
+                    companyId = prop.companyId;
+                }
+            }
             const application = await database_1.default.application.create({
                 data: {
                     tenantName,
@@ -34,7 +47,7 @@ class ApplicationController {
                     rentProposed: parseFloat(rentProposed || '0'),
                     status: status || 'Pending',
                     submittedDate: submittedDate ? new Date(submittedDate) : new Date(),
-                    companyId,
+                    companyId: companyId || null,
                 },
             });
             return (0, apiResponse_1.sendSuccess)({ res, statusCode: 201, data: application });
