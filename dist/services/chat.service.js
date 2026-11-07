@@ -22,9 +22,19 @@ class ChatService {
             return { role: 'TENANT', entityId: tenant.id, displayName: `${tenant.firstName} ${tenant.lastName}`.trim() };
         }
         if (roleStr === 'owner') {
-            const owner = await database_js_1.default.owner.findFirst({
-                where: { email: payload.email, companyId: payload.companyId },
+            let owner = await database_js_1.default.owner.findFirst({
+                where: payload.companyId ? { email: payload.email, companyId: payload.companyId } : { email: payload.email },
             });
+            if (!owner) {
+                owner = await database_js_1.default.owner.findFirst({
+                    where: { email: payload.email },
+                });
+            }
+            if (!owner && payload.companyId) {
+                owner = await database_js_1.default.owner.findFirst({
+                    where: { companyId: payload.companyId },
+                });
+            }
             if (!owner)
                 throw new appError_js_1.AppError('Owner profile not found for this account.', 404, 'NOT_FOUND');
             return { role: 'OWNER', entityId: owner.id, displayName: owner.name || 'Owner' };
@@ -81,9 +91,15 @@ class ChatService {
      * Get all active conversations for the user's role and company
      */
     async getConversations(payload) {
+        const userEntity = await this.resolveUserEntity(payload);
+        if (!payload.companyId && userEntity.role === 'OWNER') {
+            const ownerRecord = await database_js_1.default.owner.findUnique({ where: { id: userEntity.entityId } });
+            if (ownerRecord?.companyId) {
+                payload.companyId = ownerRecord.companyId;
+            }
+        }
         if (!payload.companyId)
             throw new appError_js_1.AppError('Company ID missing from user token.', 400);
-        const userEntity = await this.resolveUserEntity(payload);
         if (userEntity.role === 'TENANT') {
             const conv = await this.getOrCreateConversation(payload.companyId, 'TENANT', userEntity.entityId);
             return [await this.formatConversation(conv, payload.userId, userEntity.role)];
@@ -202,7 +218,13 @@ class ChatService {
         const conv = await database_js_1.default.conversation.findUnique({
             where: { id: conversationId },
         });
-        if (!conv || conv.companyId !== payload.companyId) {
+        if (!conv) {
+            throw new appError_js_1.AppError('Conversation not found.', 404);
+        }
+        if (!payload.companyId && conv.companyId) {
+            payload.companyId = conv.companyId;
+        }
+        if (conv.companyId !== payload.companyId) {
             throw new appError_js_1.AppError('Conversation not found.', 404);
         }
         const userEntity = await this.resolveUserEntity(payload);

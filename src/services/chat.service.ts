@@ -23,9 +23,19 @@ export class ChatService {
     }
 
     if (roleStr === 'owner') {
-      const owner = await prisma.owner.findFirst({
-        where: { email: payload.email, companyId: payload.companyId },
+      let owner = await prisma.owner.findFirst({
+        where: payload.companyId ? { email: payload.email, companyId: payload.companyId } : { email: payload.email },
       });
+      if (!owner) {
+        owner = await prisma.owner.findFirst({
+          where: { email: payload.email },
+        });
+      }
+      if (!owner && payload.companyId) {
+        owner = await prisma.owner.findFirst({
+          where: { companyId: payload.companyId },
+        });
+      }
       if (!owner) throw new AppError('Owner profile not found for this account.', 404, 'NOT_FOUND');
       return { role: 'OWNER', entityId: owner.id, displayName: owner.name || 'Owner' };
     }
@@ -89,9 +99,16 @@ export class ChatService {
    * Get all active conversations for the user's role and company
    */
   async getConversations(payload: TokenPayload) {
-    if (!payload.companyId) throw new AppError('Company ID missing from user token.', 400);
-
     const userEntity = await this.resolveUserEntity(payload);
+
+    if (!payload.companyId && userEntity.role === 'OWNER') {
+      const ownerRecord = await prisma.owner.findUnique({ where: { id: userEntity.entityId } });
+      if (ownerRecord?.companyId) {
+        payload.companyId = ownerRecord.companyId;
+      }
+    }
+
+    if (!payload.companyId) throw new AppError('Company ID missing from user token.', 400);
 
     if (userEntity.role === 'TENANT') {
       const conv = await this.getOrCreateConversation(payload.companyId, 'TENANT', userEntity.entityId);
@@ -226,7 +243,15 @@ export class ChatService {
       where: { id: conversationId },
     });
 
-    if (!conv || conv.companyId !== payload.companyId) {
+    if (!conv) {
+      throw new AppError('Conversation not found.', 404);
+    }
+
+    if (!payload.companyId && conv.companyId) {
+      payload.companyId = conv.companyId;
+    }
+
+    if (conv.companyId !== payload.companyId) {
       throw new AppError('Conversation not found.', 404);
     }
 

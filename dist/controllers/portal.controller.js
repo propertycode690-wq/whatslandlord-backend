@@ -671,20 +671,43 @@ class PortalController {
                 return (0, apiResponse_1.sendSuccess)({ res, data: [] });
             }
             const payments = await database_1.default.rentPayment.findMany({
-                where: { propertyId: { in: propertyIds } },
+                where: {
+                    propertyId: { in: propertyIds },
+                    NOT: { referenceNumber: { startsWith: 'REFUND-' } },
+                },
             });
+            // Fetch all real recorded expenses from Expense Tracker
+            const allExpenses = await database_1.default.expense.findMany();
             const statements = properties.map((p) => {
                 const propPayments = payments.filter((pay) => pay.propertyId === p.id);
-                const income = propPayments.reduce((sum, pay) => sum + pay.amount, 0);
-                const expenses = Math.round(income * 0.1);
+                const income = propPayments.reduce((sum, pay) => sum + (pay.amount || 0), 0);
+                // Find real operating expenses linked to this property
+                const propExpenses = allExpenses.filter((e) => {
+                    let parsed = {};
+                    try {
+                        parsed = JSON.parse(e.description);
+                    }
+                    catch {
+                        parsed = {};
+                    }
+                    // Skip owner profit distributions - only include real operating/maintenance/utility expenses
+                    if (parsed.payeeType === 'Owner')
+                        return false;
+                    if (parsed.propertyId && parsed.propertyId === p.id)
+                        return true;
+                    if (parsed.propertyName && p.name && parsed.propertyName.trim().toLowerCase() === p.name.trim().toLowerCase())
+                        return true;
+                    return false;
+                });
+                const totalExpenses = propExpenses.reduce((sum, exp) => sum + (exp.amount || 0), 0);
                 return {
                     id: `stmt-${p.id}`,
                     period: 'Current Period',
                     propertyName: p.name,
                     openingBalance: 0,
                     totalIncome: income,
-                    totalExpenses: expenses,
-                    netDistribution: income - expenses,
+                    totalExpenses: totalExpenses,
+                    netDistribution: income - totalExpenses,
                     endingBalance: 0,
                     status: 'Published',
                     generatedDate: new Date().toISOString().split('T')[0],
