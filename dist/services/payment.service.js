@@ -281,9 +281,25 @@ class PaymentService {
                 },
             };
         }
+        // Clean up any historical REFUND- entries from rentPayment table so they never pollute rent collections
+        await database_1.default.rentPayment.deleteMany({
+            where: {
+                referenceNumber: {
+                    startsWith: 'REFUND-',
+                },
+            },
+        }).catch(() => null);
+        const cleanWhereClause = {
+            ...whereClause,
+            NOT: {
+                referenceNumber: {
+                    startsWith: 'REFUND-',
+                },
+            },
+        };
         try {
             return await database_1.default.rentPayment.findMany({
-                where: whereClause,
+                where: cleanWhereClause,
                 include: {
                     tenant: true,
                     property: true,
@@ -298,7 +314,7 @@ class PaymentService {
         catch (err) {
             if (err?.message?.includes('Field') || err?.message?.includes('Inconsistent query result')) {
                 const rawPayments = await database_1.default.rentPayment.findMany({
-                    where: whereClause,
+                    where: cleanWhereClause,
                     orderBy: {
                         paidDate: 'desc',
                     },

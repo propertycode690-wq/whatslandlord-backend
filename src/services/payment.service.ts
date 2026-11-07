@@ -275,9 +275,27 @@ export class PaymentService {
       };
     }
 
+    // Clean up any historical REFUND- entries from rentPayment table so they never pollute rent collections
+    await prisma.rentPayment.deleteMany({
+      where: {
+        referenceNumber: {
+          startsWith: 'REFUND-',
+        },
+      },
+    }).catch(() => null);
+
+    const cleanWhereClause = {
+      ...whereClause,
+      NOT: {
+        referenceNumber: {
+          startsWith: 'REFUND-',
+        },
+      },
+    };
+
     try {
       return await prisma.rentPayment.findMany({
-        where: whereClause,
+        where: cleanWhereClause,
         include: {
           tenant: true,
           property: true,
@@ -291,7 +309,7 @@ export class PaymentService {
     } catch (err: any) {
       if (err?.message?.includes('Field') || err?.message?.includes('Inconsistent query result')) {
         const rawPayments = await prisma.rentPayment.findMany({
-          where: whereClause,
+          where: cleanWhereClause,
           orderBy: {
             paidDate: 'desc',
           },

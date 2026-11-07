@@ -2725,40 +2725,7 @@ export class PortalController {
           }
         }
 
-        // If Payee Type is 'Tenant' (Refund / Return)
-        if (payeeType === 'Tenant' || payeeType === 'Tenant (Refund / Return)' || category?.toLowerCase().includes('refund')) {
-          let tenantIdToUse = payeeId;
-          let tenantObj: any = null;
-          if (tenantIdToUse) {
-            tenantObj = await tx.tenant.findUnique({ where: { id: tenantIdToUse }, include: { leases: true } });
-          } else {
-            tenantObj = await tx.tenant.findFirst({
-              where: companyId ? { companyId } : {},
-              include: { leases: true },
-            });
-            if (tenantObj) tenantIdToUse = tenantObj.id;
-          }
-
-          if (tenantObj && tenantIdToUse) {
-            const lease = tenantObj.leases?.[0];
-            await tx.rentPayment.create({
-              data: {
-                tenantId: tenantIdToUse,
-                propertyId: tenantObj.propertyId || propertyId || 'default-property',
-                unitId: tenantObj.unitId || unitId || 'default-unit',
-                leaseId: lease?.id || 'default-lease',
-                amount: parsedAmount,
-                dueDate: new Date(date || Date.now()),
-                paidDate: new Date(date || Date.now()),
-                paymentMethod: 'ACH',
-                status: 'Paid',
-                referenceNumber: `REFUND-${Date.now()}`,
-                companyId: companyId || tenantObj.companyId || null,
-              },
-            });
-          }
-        }
-
+        // Expenses are strictly operating expenditures and do NOT pollute tenant rent payment records
         return exp;
       });
 
