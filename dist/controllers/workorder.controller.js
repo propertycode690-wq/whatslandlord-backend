@@ -127,6 +127,63 @@ class WorkOrderController {
                 where: { id, companyId },
             });
             if (sr) {
+                let tenantInfo = null;
+                if (sr.tenantId) {
+                    const tenant = await database_js_1.default.tenant.findUnique({
+                        where: { id: sr.tenantId },
+                        select: {
+                            id: true,
+                            firstName: true,
+                            lastName: true,
+                            email: true,
+                            phone: true,
+                            altPhone: true,
+                            imageUrl: true,
+                        },
+                    });
+                    if (tenant) {
+                        tenantInfo = {
+                            id: tenant.id,
+                            name: `${tenant.firstName} ${tenant.lastName}`.trim(),
+                            email: tenant.email,
+                            phone: tenant.phone,
+                            altPhone: tenant.altPhone || null,
+                            imageUrl: tenant.imageUrl || null,
+                        };
+                    }
+                }
+                if (!tenantInfo && sr.tenantName) {
+                    const tenant = await database_js_1.default.tenant.findFirst({
+                        where: companyId
+                            ? {
+                                companyId,
+                                OR: [
+                                    { firstName: { contains: sr.tenantName.split(' ')[0] } },
+                                    { lastName: { contains: sr.tenantName.split(' ').slice(-1)[0] } },
+                                ],
+                            }
+                            : {},
+                        select: {
+                            id: true,
+                            firstName: true,
+                            lastName: true,
+                            email: true,
+                            phone: true,
+                            altPhone: true,
+                            imageUrl: true,
+                        },
+                    });
+                    if (tenant) {
+                        tenantInfo = {
+                            id: tenant.id,
+                            name: `${tenant.firstName} ${tenant.lastName}`.trim(),
+                            email: tenant.email,
+                            phone: tenant.phone,
+                            altPhone: tenant.altPhone || null,
+                            imageUrl: tenant.imageUrl || null,
+                        };
+                    }
+                }
                 return (0, apiResponse_js_1.sendSuccess)({
                     res,
                     data: {
@@ -135,6 +192,13 @@ class WorkOrderController {
                         propertyId: sr.propertyId,
                         propertyName: sr.propertyName || 'Oakridge Heights',
                         unitNumber: sr.unitNumber ? `Unit ${sr.unitNumber}` : 'Unit 102',
+                        tenantId: sr.tenantId || tenantInfo?.id || null,
+                        tenantName: tenantInfo?.name || sr.tenantName || 'Resident',
+                        tenantPhone: tenantInfo?.phone || null,
+                        tenantEmail: tenantInfo?.email || null,
+                        tenantAltPhone: tenantInfo?.altPhone || null,
+                        tenantImageUrl: tenantInfo?.imageUrl || null,
+                        permissionToEnter: true,
                         vendorId: sr.assignedVendorId || '',
                         vendorName: sr.assignedVendorName || '',
                         assignedTechnician: sr.assignedVendorName || sr.assignedTechnician || '',
