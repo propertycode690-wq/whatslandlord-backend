@@ -56,6 +56,7 @@ class PortalController {
                         property: {
                             include: {
                                 owner: true,
+                                company: true,
                             },
                         },
                     },
@@ -65,6 +66,7 @@ class PortalController {
                         property: {
                             include: {
                                 owner: true,
+                                company: true,
                             },
                         },
                         unit: true,
@@ -86,6 +88,7 @@ class PortalController {
                         property: {
                             include: {
                                 owner: true,
+                                company: true,
                             },
                         },
                         unit: true,
@@ -240,6 +243,14 @@ class PortalController {
                     },
                 });
             }
+            const prop = tenant.unit?.property || (tenant.leases?.[0]?.property);
+            const comp = prop?.company;
+            const streetAddr = prop?.streetAddress || prop?.address || '';
+            const cleanTenantAddress = streetAddr
+                ? `${streetAddr}${prop?.city ? `, ${prop.city}` : ''}${prop?.state ? `, ${prop.state}` : ''}${prop?.zip ? ` ${prop.zip}` : ''}`
+                : (tenant.unit ? `Unit ${tenant.unit.unitNumber}` : 'N/A');
+            const compAddress = comp?.address || (prop ? `${prop.city || ''}, ${prop.state || ''}`.trim() : '') || 'N/A';
+            const compName = comp?.name || (prop?.managementCompany && !prop.managementCompany.includes('Apex') ? prop.managementCompany : 'Divine');
             return (0, apiResponse_1.sendSuccess)({
                 res,
                 data: {
@@ -249,9 +260,15 @@ class PortalController {
                     email: tenant.email,
                     phone: tenant.phone,
                     unitNumber: tenant.unit ? `Unit ${tenant.unit.unitNumber}` : 'Unassigned',
+                    unitDetails: tenant.unit ? `Unit ${tenant.unit.unitNumber}` : 'Unassigned',
                     emergencyContact: tenant.emergencyName ? `${tenant.emergencyName}${tenant.emergencyPhone ? ` (${tenant.emergencyPhone})` : ''}` : 'N/A',
                     vehicles: tenant.vehicles || tenant.vehicle || null,
                     pets: tenant.pets || tenant.pet || null,
+                    tenantAddress: cleanTenantAddress,
+                    companyName: compName,
+                    companyAddress: compAddress,
+                    propertyName: prop?.name || 'Property',
+                    propertyId: prop?.id,
                 },
             });
         }
@@ -3143,12 +3160,12 @@ class PortalController {
                 include: { property: true, unit: true },
                 orderBy: { startDate: 'desc' },
             }) : null;
-            const rentAmount = leaseRec?.rentAmount || 1850;
-            const depositAmount = leaseRec?.depositAmount || 1850;
-            const leaseStart = leaseRec?.startDate ? new Date(leaseRec.startDate).toLocaleDateString() : 'August 1, 2025';
-            const leaseEnd = leaseRec?.endDate ? new Date(leaseRec.endDate).toLocaleDateString() : 'July 31, 2026';
-            const propertyName = leaseRec?.property?.name || 'Apex Heights';
-            const unitNumber = leaseRec?.unit?.unitNumber || '204';
+            const rentAmount = leaseRec?.rentAmount || (tenant?.unit?.rentAmount || 0);
+            const depositAmount = leaseRec?.depositAmount || (tenant?.unit?.securityDeposit || 0);
+            const leaseStart = leaseRec?.startDate ? new Date(leaseRec.startDate).toLocaleDateString() : 'N/A';
+            const leaseEnd = leaseRec?.endDate ? new Date(leaseRec.endDate).toLocaleDateString() : 'N/A';
+            const propertyName = leaseRec?.property?.name || tenant?.unit?.property?.name || 'Property';
+            const unitNumber = leaseRec?.unit?.unitNumber || tenant?.unit?.unitNumber || 'Unit';
             const leaseSummaryText = `
 Active Lease Overview:
 - Tenant Name: ${tenant ? `${tenant.firstName} ${tenant.lastName}` : 'Resident'}
@@ -3258,9 +3275,9 @@ Active Lease Overview:
                 orderBy: { createdAt: 'desc' },
                 take: 3,
             }) : [];
-            const rentAmount = leaseRec?.rentAmount || 1850;
-            const propertyName = leaseRec?.property?.name || tenant?.unit?.property?.name || 'Apex Heights Apartments';
-            const unitNumber = leaseRec?.unit?.unitNumber || tenant?.unit?.unitNumber || '204';
+            const rentAmount = leaseRec?.rentAmount || (tenant?.unit?.rentAmount || 0);
+            const propertyName = leaseRec?.property?.name || tenant?.unit?.property?.name || 'Property';
+            const unitNumber = leaseRec?.unit?.unitNumber || tenant?.unit?.unitNumber || 'Unit';
             const tenantName = tenant ? `${tenant.firstName} ${tenant.lastName}` : 'Resident';
             // Latest maintenance status
             const latestTicket = activeMaintenance.length > 0 ? activeMaintenance[0] : null;
