@@ -362,6 +362,24 @@ export class RestoreBinController {
             where: { id: entityId },
             data: { status: 'New' as any },
           }).catch(() => {});
+        } else {
+          await (prisma.serviceRequest.create as any)({
+            data: {
+              id: entityId,
+              title: entityData.title || item.title || 'Service Request',
+              description: entityData.description || item.subtitle || 'Restored service request',
+              propertyId: entityData.propertyId || '',
+              propertyName: entityData.propertyName || 'Property',
+              unitNumber: entityData.unitNumber || '',
+              tenantId: entityData.tenantId || null,
+              tenantName: entityData.tenantName || 'Tenant',
+              priority: entityData.priority || 'Normal',
+              status: 'New',
+              category: entityData.category || 'General',
+            },
+          }).catch((err: any) => {
+            console.error('Failed to recreate restored service request in DB:', err);
+          });
         }
       } else if (entityType === 'WorkOrder') {
         const existing = await prisma.workOrder.findUnique({ where: { id: entityId } }).catch(() => null);
@@ -370,6 +388,73 @@ export class RestoreBinController {
             where: { id: entityId },
             data: { status: 'Open' as any },
           }).catch(() => {});
+        } else {
+          await (prisma.workOrder.create as any)({
+            data: {
+              id: entityId,
+              propertyId: entityData.propertyId || '',
+              title: entityData.title || item.title || 'Work Order',
+              description: entityData.description || item.subtitle || 'Restored work order',
+              vendorId: entityData.vendorId || null,
+              priority: (entityData.priority || 'Normal') as any,
+              status: 'Open' as any,
+              companyId: item.companyId || companyId || null,
+            },
+          }).catch((err: any) => {
+            console.error('Failed to recreate restored work order in DB:', err);
+          });
+        }
+      } else if (entityType === 'Invoice') {
+        const existing = await prisma.invoice.findUnique({ where: { id: entityId } }).catch(() => null);
+        if (existing) {
+          await prisma.invoice.update({
+            where: { id: entityId },
+            data: { status: 'Draft' as any },
+          }).catch(() => {});
+        } else {
+          await (prisma.invoice.create as any)({
+            data: {
+              id: entityId,
+              tenantId: entityData.tenantId || null,
+              tenantName: entityData.tenantName || 'Tenant',
+              propertyId: entityData.propertyId || '',
+              propertyName: entityData.propertyName || 'Property',
+              unitNumber: entityData.unitNumber || '',
+              dueDate: entityData.dueDate ? String(entityData.dueDate) : new Date().toISOString().split('T')[0],
+              amount: Number(entityData.amount) || 0,
+              paidAmount: Number(entityData.paidAmount) || 0,
+              balance: Number(entityData.balance) || Number(entityData.amount) || 0,
+              status: entityData.status || 'Draft',
+              lineItems: typeof entityData.lineItems === 'string' ? entityData.lineItems : JSON.stringify(entityData.lineItems || []),
+              notes: entityData.notes || null,
+              companyId: item.companyId || companyId || null,
+            },
+          }).catch((err: any) => {
+            console.error('Failed to recreate restored invoice in DB:', err);
+          });
+        }
+      } else if (entityType === 'Vendor') {
+        const existing = await prisma.vendor.findUnique({ where: { id: entityId } }).catch(() => null);
+        if (existing) {
+          await prisma.vendor.update({
+            where: { id: entityId },
+            data: { companyName: entityData.companyName || entityData.name || item.title || 'Vendor' },
+          }).catch(() => {});
+        } else {
+          await (prisma.vendor.create as any)({
+            data: {
+              id: entityId,
+              companyName: entityData.companyName || entityData.name || item.title || 'Vendor',
+              contactName: entityData.contactName || '',
+              email: entityData.email || `${entityId.substring(0, 8)}@vendor.com`,
+              phone: entityData.phone || '',
+              serviceType: entityData.serviceType || 'General',
+              rating: Number(entityData.rating) || 5,
+              companyId: item.companyId || companyId || null,
+            },
+          }).catch((err: any) => {
+            console.error('Failed to recreate restored vendor in DB:', err);
+          });
         }
       }
 

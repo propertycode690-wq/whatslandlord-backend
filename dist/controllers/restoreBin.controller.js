@@ -340,6 +340,25 @@ class RestoreBinController {
                         data: { status: 'New' },
                     }).catch(() => { });
                 }
+                else {
+                    await database_1.default.serviceRequest.create({
+                        data: {
+                            id: entityId,
+                            title: entityData.title || item.title || 'Service Request',
+                            description: entityData.description || item.subtitle || 'Restored service request',
+                            propertyId: entityData.propertyId || '',
+                            propertyName: entityData.propertyName || 'Property',
+                            unitNumber: entityData.unitNumber || '',
+                            tenantId: entityData.tenantId || null,
+                            tenantName: entityData.tenantName || 'Tenant',
+                            priority: entityData.priority || 'Normal',
+                            status: 'New',
+                            category: entityData.category || 'General',
+                        },
+                    }).catch((err) => {
+                        console.error('Failed to recreate restored service request in DB:', err);
+                    });
+                }
             }
             else if (entityType === 'WorkOrder') {
                 const existing = await database_1.default.workOrder.findUnique({ where: { id: entityId } }).catch(() => null);
@@ -348,6 +367,78 @@ class RestoreBinController {
                         where: { id: entityId },
                         data: { status: 'Open' },
                     }).catch(() => { });
+                }
+                else {
+                    await database_1.default.workOrder.create({
+                        data: {
+                            id: entityId,
+                            propertyId: entityData.propertyId || '',
+                            title: entityData.title || item.title || 'Work Order',
+                            description: entityData.description || item.subtitle || 'Restored work order',
+                            vendorId: entityData.vendorId || null,
+                            priority: (entityData.priority || 'Normal'),
+                            status: 'Open',
+                            companyId: item.companyId || companyId || null,
+                        },
+                    }).catch((err) => {
+                        console.error('Failed to recreate restored work order in DB:', err);
+                    });
+                }
+            }
+            else if (entityType === 'Invoice') {
+                const existing = await database_1.default.invoice.findUnique({ where: { id: entityId } }).catch(() => null);
+                if (existing) {
+                    await database_1.default.invoice.update({
+                        where: { id: entityId },
+                        data: { status: 'Draft' },
+                    }).catch(() => { });
+                }
+                else {
+                    await database_1.default.invoice.create({
+                        data: {
+                            id: entityId,
+                            tenantId: entityData.tenantId || null,
+                            tenantName: entityData.tenantName || 'Tenant',
+                            propertyId: entityData.propertyId || '',
+                            propertyName: entityData.propertyName || 'Property',
+                            unitNumber: entityData.unitNumber || '',
+                            dueDate: entityData.dueDate ? String(entityData.dueDate) : new Date().toISOString().split('T')[0],
+                            amount: Number(entityData.amount) || 0,
+                            paidAmount: Number(entityData.paidAmount) || 0,
+                            balance: Number(entityData.balance) || Number(entityData.amount) || 0,
+                            status: entityData.status || 'Draft',
+                            lineItems: typeof entityData.lineItems === 'string' ? entityData.lineItems : JSON.stringify(entityData.lineItems || []),
+                            notes: entityData.notes || null,
+                            companyId: item.companyId || companyId || null,
+                        },
+                    }).catch((err) => {
+                        console.error('Failed to recreate restored invoice in DB:', err);
+                    });
+                }
+            }
+            else if (entityType === 'Vendor') {
+                const existing = await database_1.default.vendor.findUnique({ where: { id: entityId } }).catch(() => null);
+                if (existing) {
+                    await database_1.default.vendor.update({
+                        where: { id: entityId },
+                        data: { companyName: entityData.companyName || entityData.name || item.title || 'Vendor' },
+                    }).catch(() => { });
+                }
+                else {
+                    await database_1.default.vendor.create({
+                        data: {
+                            id: entityId,
+                            companyName: entityData.companyName || entityData.name || item.title || 'Vendor',
+                            contactName: entityData.contactName || '',
+                            email: entityData.email || `${entityId.substring(0, 8)}@vendor.com`,
+                            phone: entityData.phone || '',
+                            serviceType: entityData.serviceType || 'General',
+                            rating: Number(entityData.rating) || 5,
+                            companyId: item.companyId || companyId || null,
+                        },
+                    }).catch((err) => {
+                        console.error('Failed to recreate restored vendor in DB:', err);
+                    });
                 }
             }
             // Remove from restore_bin
