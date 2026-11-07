@@ -427,12 +427,17 @@ class ServiceRequestController {
       const { title, description, category } = req.body;
       const companyId = req.user?.companyId;
 
-      let vendors = await prisma.vendor.findMany({
-        where: companyId ? { companyId } : {},
-      });
+      let vendors = companyId
+        ? await prisma.vendor.findMany({ where: { companyId } })
+        : await prisma.vendor.findMany();
 
       if (vendors.length === 0) {
-        vendors = await prisma.vendor.findMany({ take: 10 });
+        return sendSuccess({
+          res,
+          data: {
+            recommendedVendor: null,
+          },
+        });
       }
 
       const reqCategory = (category || 'General').toLowerCase();

@@ -110,6 +110,12 @@ class PropertyService {
                 // ignore
             }
         }
+        let companyName = '';
+        if (companyId) {
+            const comp = await database_1.default.company.findUnique({ where: { id: companyId }, select: { name: true } });
+            if (comp?.name)
+                companyName = comp.name;
+        }
         if (!ownerExists) {
             const firstOwner = await database_1.default.owner.findFirst({
                 where: companyId ? { companyId } : {},
@@ -120,9 +126,9 @@ class PropertyService {
             else {
                 const defaultOwner = await database_1.default.owner.create({
                     data: {
-                        name: 'Default Owner',
-                        email: `default.owner.${Date.now()}@example.com`,
-                        phone: '555-0100',
+                        name: companyName ? `${companyName} Owner` : 'Portfolio Owner',
+                        email: `owner.${Date.now()}@example.com`,
+                        phone: '',
                         companyId,
                     }
                 });
@@ -172,6 +178,12 @@ class PropertyService {
         else if (paymentProvider === 'COMPANY_DEFAULT') {
             paymentAccountId = null;
         }
+        const streetAddress = (data.streetAddress || data.address || '').trim();
+        const city = (data.city || '').trim();
+        const state = (data.state || '').trim();
+        const zip = (data.zip || '').trim();
+        const country = (data.country || 'USA').trim();
+        const fullAddress = (data.address || [streetAddress, city, state, zip].filter(Boolean).join(', ')).trim();
         const createdProp = await database_1.default.property.create({
             data: {
                 name: data.name,
@@ -179,17 +191,17 @@ class PropertyService {
                 status: data.status || 'Active',
                 ownerId: ownerId,
                 ownershipPercentage: Number(data.ownershipPercentage) || 100,
-                managementCompany: data.managementCompany || 'Apex Property Management',
-                address: data.address || 'Austin, TX',
-                streetAddress: data.streetAddress || data.address || '100 Main St',
-                city: data.city || 'Austin',
-                state: data.state || 'TX',
-                country: data.country || 'USA',
-                zip: data.zip || '78701',
-                yearBuilt: Number(data.yearBuilt) || 2020,
-                squareFootage: Number(data.squareFootage) || 10000,
-                purchasePrice: Number(data.purchasePrice) || 1000000,
-                currentValue: Number(data.currentValue) || 1200000,
+                managementCompany: data.managementCompany?.trim() || companyName || 'Management Co.',
+                address: fullAddress || 'Property Address',
+                streetAddress: streetAddress || 'Street Address',
+                city: city || '',
+                state: state || '',
+                country: country || 'USA',
+                zip: zip || '',
+                yearBuilt: Number(data.yearBuilt) || new Date().getFullYear(),
+                squareFootage: Number(data.squareFootage) || 0,
+                purchasePrice: Number(data.purchasePrice) || 0,
+                currentValue: Number(data.currentValue) || 0,
                 monthlyExpenses: Number(data.monthlyExpenses) || 0,
                 imageUrl: imageUrl,
                 companyId: data.companyId,
@@ -234,6 +246,12 @@ class PropertyService {
                 }
             }
         }
+        let companyName = '';
+        if (resolvedCompanyId) {
+            const comp = await database_1.default.company.findUnique({ where: { id: resolvedCompanyId }, select: { name: true } });
+            if (comp?.name)
+                companyName = comp.name;
+        }
         // Resolve or create default owner
         let defaultOwner = await database_1.default.owner.findFirst({
             where: resolvedCompanyId ? { companyId: resolvedCompanyId } : {},
@@ -241,9 +259,9 @@ class PropertyService {
         if (!defaultOwner) {
             defaultOwner = await database_1.default.owner.create({
                 data: {
-                    name: 'Default Owner',
-                    email: `default.owner.${Date.now()}@example.com`,
-                    phone: '555-0100',
+                    name: companyName ? `${companyName} Owner` : 'Portfolio Owner',
+                    email: `owner.${Date.now()}@example.com`,
+                    phone: '',
                     companyId: resolvedCompanyId,
                 },
             });
@@ -287,7 +305,7 @@ class PropertyService {
                             data: {
                                 name: trimmedOwnerName,
                                 email: `${cleanAlias}.${Date.now()}-${Math.floor(Math.random() * 1000)}@example.com`,
-                                phone: '555-0100',
+                                phone: '',
                                 companyId: resolvedCompanyId,
                             },
                         });
@@ -298,12 +316,12 @@ class PropertyService {
                 if (!resolvedOwnerId) {
                     resolvedOwnerId = defaultOwner.id;
                 }
-                const street = (item.streetAddress || item.address || item.name || '100 Main St').trim();
-                const city = (item.city || 'Austin').trim();
-                const state = (item.state || 'TX').trim();
-                const zip = (item.zip || '78701').trim();
+                const street = (item.streetAddress || item.address || item.name || '').trim();
+                const city = (item.city || '').trim();
+                const state = (item.state || '').trim();
+                const zip = (item.zip || '').trim();
                 const country = (item.country || 'USA').trim();
-                const combinedAddress = `${street}, ${city}, ${state} ${zip}`;
+                const combinedAddress = [street, city, state, zip].filter(Boolean).join(', ') || item.name;
                 const unitsCount = Math.max(1, Number(item.totalUnits || item.unitsCount || 1));
                 const occupiedUnits = Math.max(0, Math.min(unitsCount, Number(item.occupiedUnits || 0)));
                 const occupancyRate = item.occupancyRate !== undefined && item.occupancyRate !== null && !isNaN(Number(item.occupancyRate))
@@ -318,9 +336,9 @@ class PropertyService {
                         status: item.status || 'Active',
                         ownerId: resolvedOwnerId,
                         ownershipPercentage: Number(item.ownershipPercentage) || 100,
-                        managementCompany: item.managementCompany || 'Apex Property Management',
+                        managementCompany: item.managementCompany?.trim() || companyName || 'Management Co.',
                         address: combinedAddress,
-                        streetAddress: street,
+                        streetAddress: street || item.name,
                         city,
                         state,
                         country,
@@ -330,11 +348,11 @@ class PropertyService {
                         occupancyRate,
                         monthlyRevenue: Number(item.monthlyRevenue) || 0,
                         monthlyExpenses: Number(item.monthlyExpenses) || 0,
-                        yearBuilt: Number(item.yearBuilt) || 2020,
+                        yearBuilt: Number(item.yearBuilt) || new Date().getFullYear(),
                         totalBuildings,
-                        squareFootage: Number(item.squareFootage) || 10000,
-                        purchasePrice: Number(item.purchasePrice) || 1000000,
-                        currentValue: Number(item.currentValue) || 1200000,
+                        squareFootage: Number(item.squareFootage) || 0,
+                        purchasePrice: Number(item.purchasePrice) || 0,
+                        currentValue: Number(item.currentValue) || 0,
                         companyId: resolvedCompanyId,
                         nycBin: item.nycBin || null,
                     },

@@ -423,11 +423,16 @@ class ServiceRequestController {
         try {
             const { title, description, category } = req.body;
             const companyId = req.user?.companyId;
-            let vendors = await database_1.default.vendor.findMany({
-                where: companyId ? { companyId } : {},
-            });
+            let vendors = companyId
+                ? await database_1.default.vendor.findMany({ where: { companyId } })
+                : await database_1.default.vendor.findMany();
             if (vendors.length === 0) {
-                vendors = await database_1.default.vendor.findMany({ take: 10 });
+                return (0, apiResponse_1.sendSuccess)({
+                    res,
+                    data: {
+                        recommendedVendor: null,
+                    },
+                });
             }
             const reqCategory = (category || 'General').toLowerCase();
             const textToAnalyze = `${title || ''} ${description || ''}`.toLowerCase();

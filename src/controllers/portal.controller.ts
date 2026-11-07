@@ -358,30 +358,34 @@ export class PortalController {
 
       // 2. Auto-find matching vendor for this company & category
       const reqCategoryLower = category.toLowerCase();
-      let vendor = await prisma.vendor.findFirst({
-        where: companyId
-          ? { companyId, serviceType: { contains: reqCategoryLower } }
-          : { serviceType: { contains: reqCategoryLower } },
-        orderBy: { rating: 'desc' },
-      });
-
-      if (!vendor) {
+      let vendor = null;
+      if (companyId) {
         vendor = await prisma.vendor.findFirst({
-          where: companyId ? { companyId } : {},
+          where: { companyId, serviceType: { contains: reqCategoryLower } },
           orderBy: { rating: 'desc' },
         });
+
+        if (!vendor) {
+          vendor = await prisma.vendor.findFirst({
+            where: { companyId },
+            orderBy: { rating: 'desc' },
+          });
+        }
       }
 
       const assignedVendorId = vendor?.id || null;
-      const assignedVendorName = vendor?.companyName || 'Apex Pro Maintenance Co.';
-      const assignedTechnician = vendor ? `${vendor.contactName} (Lead Technician)` : 'Lead Technician';
+      const assignedVendorName = vendor ? vendor.companyName : null;
+      const assignedTechnician = vendor ? (vendor.contactName ? `${vendor.contactName} (Lead Technician)` : 'Lead Technician') : null;
+      const ticketStatus = vendor ? 'Assigned' : 'Open';
 
       const initialMessage = JSON.stringify([
         {
           id: `msg-${Date.now()}`,
           senderName: 'WhatsLandlord AI System',
           role: 'System',
-          text: `Ticket automatically categorized as '${category}' with AI estimated cost of $${benchmarkCost}${computedPriority === 'Emergency' ? ' [EMERGENCY HAZARD FLAGGED]' : ''} and assigned to ${assignedVendorName} (${assignedTechnician}). Contractor notified.`,
+          text: vendor
+            ? `Ticket automatically categorized as '${category}' with AI estimated cost of $${benchmarkCost}${computedPriority === 'Emergency' ? ' [EMERGENCY HAZARD FLAGGED]' : ''} and assigned to ${assignedVendorName} (${assignedTechnician}). Contractor notified.`
+            : `Ticket automatically categorized as '${category}' with AI estimated cost of $${benchmarkCost}${computedPriority === 'Emergency' ? ' [EMERGENCY HAZARD FLAGGED]' : ''}. Awaiting staff assignment by property manager.`,
           timestamp: new Date().toLocaleString(),
         },
       ]);
@@ -393,7 +397,7 @@ export class PortalController {
           scheduledDate: preferredTime || null,
           notes: preferredTime ? `Preferred Visit: ${preferredTime}` : null,
           priority: computedPriority,
-          status: 'Assigned',
+          status: ticketStatus,
           category: category,
           propertyId: propertyId,
           propertyName: propertyRec?.name || 'Property',
@@ -410,15 +414,27 @@ export class PortalController {
         },
       });
 
-      // Dispatch Notification for Maintenance Staff
-      await createNotification({
-        title: 'New Maintenance Task Assigned',
-        message: `${computedPriority} priority: "${title || `${category} Repair Request`}" at ${propertyRec?.name || 'Property'} (Unit ${tenant?.unit ? tenant.unit.unitNumber : 'N/A'})`,
-        role: 'Maintenance Staff',
-        companyId: companyId,
-        targetId: newRequest.id,
-        targetUrl: '/staff/tasks',
-      });
+      if (vendor) {
+        // Dispatch Notification for Maintenance Staff
+        await createNotification({
+          title: 'New Maintenance Task Assigned',
+          message: `${computedPriority} priority: "${title || `${category} Repair Request`}" at ${propertyRec?.name || 'Property'} (Unit ${tenant?.unit ? tenant.unit.unitNumber : 'N/A'})`,
+          role: 'Maintenance Staff',
+          companyId: companyId,
+          targetId: newRequest.id,
+          targetUrl: '/staff/tasks',
+        });
+      } else {
+        // Dispatch Notification for Property Manager when staff is needed
+        await createNotification({
+          title: 'New Maintenance Request Raised',
+          message: `${computedPriority} priority: "${title || `${category} Repair Request`}" at ${propertyRec?.name || 'Property'} (Awaiting staff assignment)`,
+          role: 'Property Manager',
+          companyId: companyId,
+          targetId: newRequest.id,
+          targetUrl: '/maintenance',
+        });
+      }
 
       return sendSuccess({
         res,
