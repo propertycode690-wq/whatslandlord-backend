@@ -608,23 +608,88 @@ export class PortalController {
         return sendSuccess({ res, data: [] });
       }
 
+      // 1. Fetch real rent payments (Income)
       const payments = await prisma.rentPayment.findMany({
-        where: { propertyId: { in: propertyIds } },
+        where: { 
+          propertyId: { in: propertyIds },
+          NOT: { referenceNumber: { startsWith: 'REFUND-' } },
+        },
         include: { property: true, tenant: true },
         orderBy: { paidDate: 'desc' },
       });
 
-      const formatted = payments.map((p: any) => ({
+      const formattedPayments = payments.map((p: any) => ({
         id: p.id,
         date: p.paidDate ? new Date(p.paidDate).toISOString().split('T')[0] : (p.dueDate ? new Date(p.dueDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]),
         propertyName: p.property?.name || 'Property',
         tenantName: p.tenant ? `${p.tenant.firstName} ${p.tenant.lastName}` : 'Resident',
         category: 'Rental Income',
+        type: 'Income',
         amount: p.amount,
         status: p.status || 'Cleared',
       }));
 
-      return sendSuccess({ res, data: formatted });
+      // 2. Fetch real operating expenses linked to owner properties
+      const allExpenses = await prisma.expense.findMany();
+      const propExpenses = allExpenses.filter((e: any) => {
+        let parsed: any = {};
+        try { parsed = JSON.parse(e.description); } catch { parsed = {}; }
+        if (parsed.payeeType === 'Owner') return false; // distributions are separate
+        if (parsed.propertyId && propertyIds.includes(parsed.propertyId)) return true;
+        if (parsed.propertyName && properties.some((p: any) => p.name && p.name.trim().toLowerCase() === String(parsed.propertyName || '').trim().toLowerCase())) return true;
+        return false;
+      });
+
+      const formattedExpenses = propExpenses.map((exp: any) => {
+        let parsed: any = {};
+        try { parsed = JSON.parse(exp.description); } catch { parsed = {}; }
+        const matchedProp = properties.find((p) => p.id === parsed.propertyId || (p.name && p.name.trim().toLowerCase() === String(parsed.propertyName || '').trim().toLowerCase()));
+        return {
+          id: exp.id,
+          date: exp.date ? new Date(exp.date).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+          propertyName: matchedProp?.name || parsed.propertyName || 'Property Asset',
+          tenantName: parsed.vendorName || (parsed.payeeType === 'Tenant' ? 'Tenant Reimbursement' : 'Operating Vendor'),
+          category: `${exp.category || 'Utilities'} Expense`,
+          type: 'Expense',
+          amount: exp.amount,
+          status: 'Cleared',
+        };
+      });
+
+      // 3. Fetch real owner distributions
+      const userEmail = req.user?.email;
+      const companyId = req.user?.companyId;
+      let owner: any = null;
+      if (userEmail) {
+        owner = await prisma.owner.findFirst({
+          where: companyId ? { email: userEmail, companyId } : { email: userEmail },
+        });
+      }
+      const distWhere: any = {};
+      if (owner) distWhere.ownerId = owner.id;
+      else if (companyId) distWhere.companyId = companyId;
+
+      const distributions = await prisma.ownerDistribution.findMany({
+        where: Object.keys(distWhere).length > 0 ? distWhere : (companyId ? { companyId } : {}),
+        orderBy: { processedDate: 'desc' },
+      });
+
+      const formattedDistributions = distributions.map((d: any) => ({
+        id: d.id,
+        date: d.processedDate ? new Date(d.processedDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+        propertyName: d.period || 'Portfolio Distribution',
+        tenantName: 'Property Owner (Payout)',
+        category: 'Owner Distribution',
+        type: 'Distribution',
+        amount: d.amount,
+        status: d.status || 'Completed',
+      }));
+
+      // Combine and sort by date descending
+      const combined = [...formattedPayments, ...formattedExpenses, ...formattedDistributions];
+      combined.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+      return sendSuccess({ res, data: combined });
     } catch (error) {
       next(error);
     }
@@ -1101,20 +1166,61 @@ export class PortalController {
         });
       }
 
+      // Real rental revenue
       const payments = await prisma.rentPayment.findMany({
-        where: { propertyId: { in: propertyIds } },
+        where: { 
+          propertyId: { in: propertyIds },
+          NOT: { referenceNumber: { startsWith: 'REFUND-' } },
+        },
       });
+      const revenue = payments.reduce((sum, p) => sum + (p.amount || 0), 0);
 
-      const revenue = payments.reduce((sum, p) => sum + p.amount, 0);
-      const expenses = Math.round(revenue * 0.1);
-      const distribution = revenue - expenses;
+      // Real property operating expenses
+      const allExpenses = await prisma.expense.findMany();
+      const propExpenses = allExpenses.filter((e: any) => {
+        let parsed: any = {};
+        try { parsed = JSON.parse(e.description); } catch { parsed = {}; }
+        if (parsed.payeeType === 'Owner') return false;
+        if (parsed.propertyId && propertyIds.includes(parsed.propertyId)) return true;
+        if (parsed.propertyName && properties.some((p: any) => p.name && p.name.trim().toLowerCase() === String(parsed.propertyName || '').trim().toLowerCase())) return true;
+        return false;
+      });
+      const expenses = propExpenses.reduce((sum, exp) => sum + (exp.amount || 0), 0);
+
+      // Real Occupancy Rate
+      const totalUnits = properties.reduce((sum, p) => sum + (p.unitsCount || p.units?.length || 1), 0);
+      const activeUnitsCount = properties.reduce((sum, p) => {
+        const rawUnits = p.units || [];
+        return sum + rawUnits.filter((u: any) => u.status === 'Occupied').length;
+      }, 0);
+      const occupancy = totalUnits > 0 ? Math.round((activeUnitsCount / totalUnits) * 100) : 0;
+
+      // Real Distribution
+      const userEmail = req.user?.email;
+      const companyId = req.user?.companyId;
+      let owner: any = null;
+      if (userEmail) {
+        owner = await prisma.owner.findFirst({
+          where: companyId ? { email: userEmail, companyId } : { email: userEmail },
+        });
+      }
+      const distWhere: any = {};
+      if (owner) distWhere.ownerId = owner.id;
+      else if (companyId) distWhere.companyId = companyId;
+
+      const distributions = await prisma.ownerDistribution.findMany({
+        where: Object.keys(distWhere).length > 0 ? distWhere : (companyId ? { companyId } : {}),
+      });
+      const distribution = distributions.length > 0
+        ? distributions.reduce((sum, d) => sum + (d.amount || 0), 0)
+        : Math.max(0, revenue - expenses);
 
       return sendSuccess({
         res,
         data: {
           revenue,
           expenses,
-          occupancy: 95.0,
+          occupancy,
           distribution,
         },
       });
@@ -1145,12 +1251,26 @@ export class PortalController {
         });
       }
 
+      // Real rental revenue
       const payments = await prisma.rentPayment.findMany({
-        where: { propertyId: { in: propertyIds } },
+        where: { 
+          propertyId: { in: propertyIds },
+          NOT: { referenceNumber: { startsWith: 'REFUND-' } },
+        },
       });
+      const monthlyIncome = payments.reduce((sum, p) => sum + (p.amount || 0), 0);
 
-      const monthlyIncome = payments.reduce((sum, p) => sum + p.amount, 0);
-      const monthlyExpenses = Math.round(monthlyIncome * 0.1);
+      // Real operating expenses
+      const allExpenses = await prisma.expense.findMany();
+      const propExpenses = allExpenses.filter((e: any) => {
+        let parsed: any = {};
+        try { parsed = JSON.parse(e.description); } catch { parsed = {}; }
+        if (parsed.payeeType === 'Owner') return false;
+        if (parsed.propertyId && propertyIds.includes(parsed.propertyId)) return true;
+        if (parsed.propertyName && properties.some((p: any) => p.name && p.name.trim().toLowerCase() === String(parsed.propertyName || '').trim().toLowerCase())) return true;
+        return false;
+      });
+      const monthlyExpenses = propExpenses.reduce((sum, exp) => sum + (exp.amount || 0), 0);
       const netDistribution = monthlyIncome - monthlyExpenses;
 
       const totalProperties = properties.length;

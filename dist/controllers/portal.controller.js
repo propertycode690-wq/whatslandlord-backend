@@ -607,21 +607,95 @@ class PortalController {
             if (propertyIds.length === 0) {
                 return (0, apiResponse_1.sendSuccess)({ res, data: [] });
             }
+            // 1. Fetch real rent payments (Income)
             const payments = await database_1.default.rentPayment.findMany({
-                where: { propertyId: { in: propertyIds } },
+                where: {
+                    propertyId: { in: propertyIds },
+                    NOT: { referenceNumber: { startsWith: 'REFUND-' } },
+                },
                 include: { property: true, tenant: true },
                 orderBy: { paidDate: 'desc' },
             });
-            const formatted = payments.map((p) => ({
+            const formattedPayments = payments.map((p) => ({
                 id: p.id,
                 date: p.paidDate ? new Date(p.paidDate).toISOString().split('T')[0] : (p.dueDate ? new Date(p.dueDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]),
                 propertyName: p.property?.name || 'Property',
                 tenantName: p.tenant ? `${p.tenant.firstName} ${p.tenant.lastName}` : 'Resident',
                 category: 'Rental Income',
+                type: 'Income',
                 amount: p.amount,
                 status: p.status || 'Cleared',
             }));
-            return (0, apiResponse_1.sendSuccess)({ res, data: formatted });
+            // 2. Fetch real operating expenses linked to owner properties
+            const allExpenses = await database_1.default.expense.findMany();
+            const propExpenses = allExpenses.filter((e) => {
+                let parsed = {};
+                try {
+                    parsed = JSON.parse(e.description);
+                }
+                catch {
+                    parsed = {};
+                }
+                if (parsed.payeeType === 'Owner')
+                    return false; // distributions are separate
+                if (parsed.propertyId && propertyIds.includes(parsed.propertyId))
+                    return true;
+                if (parsed.propertyName && properties.some((p) => p.name && p.name.trim().toLowerCase() === String(parsed.propertyName || '').trim().toLowerCase()))
+                    return true;
+                return false;
+            });
+            const formattedExpenses = propExpenses.map((exp) => {
+                let parsed = {};
+                try {
+                    parsed = JSON.parse(exp.description);
+                }
+                catch {
+                    parsed = {};
+                }
+                const matchedProp = properties.find((p) => p.id === parsed.propertyId || (p.name && p.name.trim().toLowerCase() === String(parsed.propertyName || '').trim().toLowerCase()));
+                return {
+                    id: exp.id,
+                    date: exp.date ? new Date(exp.date).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+                    propertyName: matchedProp?.name || parsed.propertyName || 'Property Asset',
+                    tenantName: parsed.vendorName || (parsed.payeeType === 'Tenant' ? 'Tenant Reimbursement' : 'Operating Vendor'),
+                    category: `${exp.category || 'Utilities'} Expense`,
+                    type: 'Expense',
+                    amount: exp.amount,
+                    status: 'Cleared',
+                };
+            });
+            // 3. Fetch real owner distributions
+            const userEmail = req.user?.email;
+            const companyId = req.user?.companyId;
+            let owner = null;
+            if (userEmail) {
+                owner = await database_1.default.owner.findFirst({
+                    where: companyId ? { email: userEmail, companyId } : { email: userEmail },
+                });
+            }
+            const distWhere = {};
+            if (owner)
+                distWhere.ownerId = owner.id;
+            else if (companyId)
+                distWhere.companyId = companyId;
+            const distributions = await database_1.default.ownerDistribution.findMany({
+                where: Object.keys(distWhere).length > 0 ? distWhere : (companyId ? { companyId } : {}),
+                orderBy: { processedDate: 'desc' },
+            });
+            const formattedDistributions = distributions.map((d) => ({
+                id: d.id,
+                date: d.processedDate ? new Date(d.processedDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+                propertyName: d.period || 'Portfolio Distribution',
+                tenantName: 'Property Owner (Payout)',
+                category: 'Owner Distribution',
+                type: 'Distribution',
+                amount: d.amount,
+                status: d.status || 'Completed',
+            }));
+            // Combine and sort by date descending
+            const combined = [...formattedPayments, ...formattedExpenses, ...formattedDistributions];
+            combined.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+            return (0, apiResponse_1.sendSuccess)({ res, data: combined });
         }
         catch (error) {
             next(error);
@@ -1062,18 +1136,66 @@ class PortalController {
                     data: { revenue: 0, expenses: 0, occupancy: 0, distribution: 0 },
                 });
             }
+            // Real rental revenue
             const payments = await database_1.default.rentPayment.findMany({
-                where: { propertyId: { in: propertyIds } },
+                where: {
+                    propertyId: { in: propertyIds },
+                    NOT: { referenceNumber: { startsWith: 'REFUND-' } },
+                },
             });
-            const revenue = payments.reduce((sum, p) => sum + p.amount, 0);
-            const expenses = Math.round(revenue * 0.1);
-            const distribution = revenue - expenses;
+            const revenue = payments.reduce((sum, p) => sum + (p.amount || 0), 0);
+            // Real property operating expenses
+            const allExpenses = await database_1.default.expense.findMany();
+            const propExpenses = allExpenses.filter((e) => {
+                let parsed = {};
+                try {
+                    parsed = JSON.parse(e.description);
+                }
+                catch {
+                    parsed = {};
+                }
+                if (parsed.payeeType === 'Owner')
+                    return false;
+                if (parsed.propertyId && propertyIds.includes(parsed.propertyId))
+                    return true;
+                if (parsed.propertyName && properties.some((p) => p.name && p.name.trim().toLowerCase() === String(parsed.propertyName || '').trim().toLowerCase()))
+                    return true;
+                return false;
+            });
+            const expenses = propExpenses.reduce((sum, exp) => sum + (exp.amount || 0), 0);
+            // Real Occupancy Rate
+            const totalUnits = properties.reduce((sum, p) => sum + (p.unitsCount || p.units?.length || 1), 0);
+            const activeUnitsCount = properties.reduce((sum, p) => {
+                const rawUnits = p.units || [];
+                return sum + rawUnits.filter((u) => u.status === 'Occupied').length;
+            }, 0);
+            const occupancy = totalUnits > 0 ? Math.round((activeUnitsCount / totalUnits) * 100) : 0;
+            // Real Distribution
+            const userEmail = req.user?.email;
+            const companyId = req.user?.companyId;
+            let owner = null;
+            if (userEmail) {
+                owner = await database_1.default.owner.findFirst({
+                    where: companyId ? { email: userEmail, companyId } : { email: userEmail },
+                });
+            }
+            const distWhere = {};
+            if (owner)
+                distWhere.ownerId = owner.id;
+            else if (companyId)
+                distWhere.companyId = companyId;
+            const distributions = await database_1.default.ownerDistribution.findMany({
+                where: Object.keys(distWhere).length > 0 ? distWhere : (companyId ? { companyId } : {}),
+            });
+            const distribution = distributions.length > 0
+                ? distributions.reduce((sum, d) => sum + (d.amount || 0), 0)
+                : Math.max(0, revenue - expenses);
             return (0, apiResponse_1.sendSuccess)({
                 res,
                 data: {
                     revenue,
                     expenses,
-                    occupancy: 95.0,
+                    occupancy,
                     distribution,
                 },
             });
@@ -1102,11 +1224,33 @@ class PortalController {
                     },
                 });
             }
+            // Real rental revenue
             const payments = await database_1.default.rentPayment.findMany({
-                where: { propertyId: { in: propertyIds } },
+                where: {
+                    propertyId: { in: propertyIds },
+                    NOT: { referenceNumber: { startsWith: 'REFUND-' } },
+                },
             });
-            const monthlyIncome = payments.reduce((sum, p) => sum + p.amount, 0);
-            const monthlyExpenses = Math.round(monthlyIncome * 0.1);
+            const monthlyIncome = payments.reduce((sum, p) => sum + (p.amount || 0), 0);
+            // Real operating expenses
+            const allExpenses = await database_1.default.expense.findMany();
+            const propExpenses = allExpenses.filter((e) => {
+                let parsed = {};
+                try {
+                    parsed = JSON.parse(e.description);
+                }
+                catch {
+                    parsed = {};
+                }
+                if (parsed.payeeType === 'Owner')
+                    return false;
+                if (parsed.propertyId && propertyIds.includes(parsed.propertyId))
+                    return true;
+                if (parsed.propertyName && properties.some((p) => p.name && p.name.trim().toLowerCase() === String(parsed.propertyName || '').trim().toLowerCase()))
+                    return true;
+                return false;
+            });
+            const monthlyExpenses = propExpenses.reduce((sum, exp) => sum + (exp.amount || 0), 0);
             const netDistribution = monthlyIncome - monthlyExpenses;
             const totalProperties = properties.length;
             const totalUnits = properties.reduce((sum, p) => sum + (p.unitsCount || p.units?.length || 1), 0);
