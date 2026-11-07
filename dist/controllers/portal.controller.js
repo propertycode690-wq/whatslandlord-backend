@@ -710,16 +710,8 @@ class PortalController {
             ]);
             const formattedSRs = serviceRequests.map((sr, idx) => {
                 const estCost = Number(sr.estimatedCost || 0);
-                const rawActual = Number(sr.cost || sr.actualCost || 0);
-                const rawExtra = Number(sr.extraCost || sr.extraExpenses || 0);
-                let actualCost = rawActual;
-                if (rawActual > 0 && rawActual < estCost) {
-                    actualCost = estCost + rawActual;
-                }
-                else if (rawActual === 0 && rawExtra > 0) {
-                    actualCost = estCost + rawExtra;
-                }
-                const extraCost = rawExtra > 0 ? rawExtra : Math.max(0, actualCost - estCost);
+                const actualCost = Number(sr.cost || sr.actualCost || sr.labourCost || 0);
+                const extraExpenses = Number(sr.extraExpenses || sr.extraCost || 0);
                 return {
                     id: sr.id,
                     requestNumber: `#SR-${1001 + idx}`,
@@ -735,41 +727,35 @@ class PortalController {
                     estimatedCost: estCost,
                     actualCost: actualCost,
                     cost: actualCost,
-                    extraCost: extraCost,
+                    extraCost: extraExpenses,
+                    extraExpenses: extraExpenses,
                     date: sr.createdAt ? new Date(sr.createdAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
                     assignedVendorName: sr.assignedVendorName || sr.assignedTechnician || 'Unassigned',
                 };
             });
             const formattedWOs = workOrders.map((wo, idx) => {
                 const estCost = Number(wo.estimatedCost || 0);
-                const rawActual = Number(wo.actualCost || wo.cost || 0);
-                const rawExtra = Number(wo.extraCost || wo.extraExpenses || 0);
-                let actualCost = rawActual;
-                if (rawActual > 0 && rawActual < estCost) {
-                    actualCost = estCost + rawActual;
-                }
-                else if (rawActual === 0 && rawExtra > 0) {
-                    actualCost = estCost + rawExtra;
-                }
-                const extraCost = rawExtra > 0 ? rawExtra : Math.max(0, actualCost - estCost);
+                const actualCost = Number(wo.actualCost || wo.cost || wo.labourCost || 0);
+                const extraExpenses = Number(wo.extraExpenses || wo.extraCost || 0);
                 return {
                     id: wo.id,
-                    requestNumber: `#WO-${2001 + idx}`,
+                    requestNumber: `#WO-${1001 + idx}`,
                     type: 'Work Order',
                     title: wo.title || 'Maintenance Work Order',
                     description: wo.description || '',
                     propertyId: wo.propertyId,
-                    propertyName: wo.property?.name || wo.propertyName || 'Property',
-                    unitNumber: wo.unitNumber || 'Unit',
-                    tenantName: wo.tenantName || 'Resident',
+                    propertyName: wo.property?.name || 'Property',
+                    unitNumber: 'Unit 102',
+                    tenantName: 'Resident',
                     priority: wo.priority || 'Normal',
                     status: wo.status || 'Open',
                     estimatedCost: estCost,
                     actualCost: actualCost,
                     cost: actualCost,
-                    extraCost: extraCost,
+                    extraCost: extraExpenses,
+                    extraExpenses: extraExpenses,
                     date: wo.createdAt ? new Date(wo.createdAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
-                    assignedVendorName: wo.vendorName || wo.assignedTechnician || 'Vendor',
+                    assignedVendorName: wo.vendor?.companyName || 'Contractor',
                 };
             });
             const combined = [...formattedSRs];

@@ -14,7 +14,20 @@ export class PropertyService {
         if (owner) {
           const properties = await prisma.property.findMany({
             where: { ownerId: owner.id, status: { notIn: ['Inactive', 'Deleted'] } },
-            include: { owner: true, buildings: true, units: true },
+            include: {
+              owner: true,
+              buildings: true,
+              units: {
+                include: {
+                  leases: {
+                    include: {
+                      tenant: true,
+                    },
+                  },
+                  tenants: true,
+                },
+              },
+            },
           });
           return properties.map((p: any) => ({
             ...p,
@@ -45,7 +58,16 @@ export class PropertyService {
       include: {
         owner: true,
         buildings: true,
-        units: true,
+        units: {
+          include: {
+            leases: {
+              include: {
+                tenant: true,
+              },
+            },
+            tenants: true,
+          },
+        },
       },
     });
 
@@ -63,7 +85,16 @@ export class PropertyService {
       include: {
         owner: true,
         buildings: true,
-        units: true,
+        units: {
+          include: {
+            leases: {
+              include: {
+                tenant: true,
+              },
+            },
+            tenants: true,
+          },
+        },
       },
     });
     if (!prop) throw new AppError('Property not found.', 404, 'NOT_FOUND');

@@ -19,7 +19,20 @@ class PropertyService {
                 if (owner) {
                     const properties = await database_1.default.property.findMany({
                         where: { ownerId: owner.id, status: { notIn: ['Inactive', 'Deleted'] } },
-                        include: { owner: true, buildings: true, units: true },
+                        include: {
+                            owner: true,
+                            buildings: true,
+                            units: {
+                                include: {
+                                    leases: {
+                                        include: {
+                                            tenant: true,
+                                        },
+                                    },
+                                    tenants: true,
+                                },
+                            },
+                        },
                     });
                     return properties.map((p) => ({
                         ...p,
@@ -48,7 +61,16 @@ class PropertyService {
             include: {
                 owner: true,
                 buildings: true,
-                units: true,
+                units: {
+                    include: {
+                        leases: {
+                            include: {
+                                tenant: true,
+                            },
+                        },
+                        tenants: true,
+                    },
+                },
             },
         });
         return properties.map((p) => ({
@@ -64,7 +86,16 @@ class PropertyService {
             include: {
                 owner: true,
                 buildings: true,
-                units: true,
+                units: {
+                    include: {
+                        leases: {
+                            include: {
+                                tenant: true,
+                            },
+                        },
+                        tenants: true,
+                    },
+                },
             },
         });
         if (!prop)
