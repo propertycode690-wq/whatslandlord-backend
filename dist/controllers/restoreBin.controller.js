@@ -221,6 +221,21 @@ class RestoreBinController {
                         data: { status: entityData.status && entityData.status !== 'Deleted' ? entityData.status : 'Active' },
                     });
                 }
+                else {
+                    await database_1.default.property.create({
+                        data: {
+                            id: entityId,
+                            name: entityData.name || item.title || 'Restored Property',
+                            address: entityData.address || entityData.streetAddress || item.subtitle || '',
+                            type: entityData.type || 'Apartment',
+                            status: 'Active',
+                            ownerId: entityData.ownerId || null,
+                            companyId: item.companyId || companyId || null,
+                        },
+                    }).catch((err) => {
+                        console.error('Failed to recreate restored property in DB:', err);
+                    });
+                }
             }
             else if (entityType === 'Unit') {
                 const existing = await database_1.default.unit.findUnique({ where: { id: entityId } }).catch(() => null);
@@ -228,6 +243,19 @@ class RestoreBinController {
                     await database_1.default.unit.update({
                         where: { id: entityId },
                         data: { status: (entityData.status && entityData.status !== 'Inactive' ? entityData.status : 'Vacant') },
+                    });
+                }
+                else {
+                    await database_1.default.unit.create({
+                        data: {
+                            id: entityId,
+                            unitNumber: entityData.unitNumber || item.title?.replace('Unit ', '') || '101',
+                            propertyId: entityData.propertyId || null,
+                            status: 'Vacant',
+                            rentAmount: entityData.rentAmount || 0,
+                        },
+                    }).catch((err) => {
+                        console.error('Failed to recreate restored unit in DB:', err);
                     });
                 }
             }
@@ -239,6 +267,25 @@ class RestoreBinController {
                         data: { status: (entityData.status && entityData.status !== 'Inactive' ? entityData.status : 'Active') },
                     });
                 }
+                else {
+                    const resolvedFirstName = entityData.firstName || item.title?.split(' ')[0] || 'Tenant';
+                    const resolvedLastName = entityData.lastName || item.title?.split(' ').slice(1).join(' ') || 'User';
+                    const resolvedEmail = entityData.email || `${entityId.substring(0, 8)}@example.com`;
+                    await database_1.default.tenant.create({
+                        data: {
+                            id: entityId,
+                            firstName: resolvedFirstName,
+                            lastName: resolvedLastName,
+                            email: resolvedEmail,
+                            phone: entityData.phone || '',
+                            unitId: entityData.unitId || null,
+                            status: 'Active',
+                            companyId: item.companyId || companyId || null,
+                        },
+                    }).catch((err) => {
+                        console.error('Failed to recreate restored tenant in DB:', err);
+                    });
+                }
             }
             else if (entityType === 'Lease') {
                 const existing = await database_1.default.lease.findUnique({ where: { id: entityId } }).catch(() => null);
@@ -246,6 +293,23 @@ class RestoreBinController {
                     await database_1.default.lease.update({
                         where: { id: entityId },
                         data: { status: (entityData.status && entityData.status !== 'Terminated' ? entityData.status : 'Active') },
+                    });
+                }
+                else {
+                    await database_1.default.lease.create({
+                        data: {
+                            id: entityId,
+                            tenantId: entityData.tenantId,
+                            propertyId: entityData.propertyId,
+                            unitId: entityData.unitId,
+                            startDate: entityData.startDate ? new Date(entityData.startDate) : new Date(),
+                            endDate: entityData.endDate ? new Date(entityData.endDate) : new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
+                            rentAmount: entityData.rentAmount || 0,
+                            status: 'Active',
+                            companyId: item.companyId || companyId || null,
+                        },
+                    }).catch((err) => {
+                        console.error('Failed to recreate restored lease in DB:', err);
                     });
                 }
             }

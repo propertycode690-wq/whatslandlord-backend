@@ -252,6 +252,20 @@ export class RestoreBinController {
             where: { id: entityId },
             data: { status: entityData.status && entityData.status !== 'Deleted' ? entityData.status : 'Active' },
           });
+        } else {
+          await (prisma.property.create as any)({
+            data: {
+              id: entityId,
+              name: entityData.name || item.title || 'Restored Property',
+              address: entityData.address || entityData.streetAddress || item.subtitle || '',
+              type: entityData.type || 'Apartment',
+              status: 'Active',
+              ownerId: entityData.ownerId || null,
+              companyId: item.companyId || companyId || null,
+            },
+          }).catch((err: any) => {
+            console.error('Failed to recreate restored property in DB:', err);
+          });
         }
       } else if (entityType === 'Unit') {
         const existing = await prisma.unit.findUnique({ where: { id: entityId } }).catch(() => null);
@@ -259,6 +273,18 @@ export class RestoreBinController {
           await prisma.unit.update({
             where: { id: entityId },
             data: { status: (entityData.status && entityData.status !== 'Inactive' ? entityData.status : 'Vacant') as any },
+          });
+        } else {
+          await (prisma.unit.create as any)({
+            data: {
+              id: entityId,
+              unitNumber: entityData.unitNumber || item.title?.replace('Unit ', '') || '101',
+              propertyId: entityData.propertyId || null,
+              status: 'Vacant',
+              rentAmount: entityData.rentAmount || 0,
+            },
+          }).catch((err: any) => {
+            console.error('Failed to recreate restored unit in DB:', err);
           });
         }
       } else if (entityType === 'Tenant') {
@@ -268,6 +294,24 @@ export class RestoreBinController {
             where: { id: entityId },
             data: { status: (entityData.status && entityData.status !== 'Inactive' ? entityData.status : 'Active') as any },
           });
+        } else {
+          const resolvedFirstName = entityData.firstName || item.title?.split(' ')[0] || 'Tenant';
+          const resolvedLastName = entityData.lastName || item.title?.split(' ').slice(1).join(' ') || 'User';
+          const resolvedEmail = entityData.email || `${entityId.substring(0, 8)}@example.com`;
+          await (prisma.tenant.create as any)({
+            data: {
+              id: entityId,
+              firstName: resolvedFirstName,
+              lastName: resolvedLastName,
+              email: resolvedEmail,
+              phone: entityData.phone || '',
+              unitId: entityData.unitId || null,
+              status: 'Active',
+              companyId: item.companyId || companyId || null,
+            },
+          }).catch((err: any) => {
+            console.error('Failed to recreate restored tenant in DB:', err);
+          });
         }
       } else if (entityType === 'Lease') {
         const existing = await prisma.lease.findUnique({ where: { id: entityId } }).catch(() => null);
@@ -275,6 +319,22 @@ export class RestoreBinController {
           await prisma.lease.update({
             where: { id: entityId },
             data: { status: (entityData.status && entityData.status !== 'Terminated' ? entityData.status : 'Active') as any },
+          });
+        } else {
+          await (prisma.lease.create as any)({
+            data: {
+              id: entityId,
+              tenantId: entityData.tenantId,
+              propertyId: entityData.propertyId,
+              unitId: entityData.unitId,
+              startDate: entityData.startDate ? new Date(entityData.startDate) : new Date(),
+              endDate: entityData.endDate ? new Date(entityData.endDate) : new Date(Date.now() + 365*24*60*60*1000),
+              rentAmount: entityData.rentAmount || 0,
+              status: 'Active',
+              companyId: item.companyId || companyId || null,
+            },
+          }).catch((err: any) => {
+            console.error('Failed to recreate restored lease in DB:', err);
           });
         }
       } else if (entityType === 'Owner') {
