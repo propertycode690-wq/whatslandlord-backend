@@ -361,7 +361,7 @@ export class SecondaryService {
       totalUnitsCount = totalUnits;
       occupiedUnitsCount = occupiedUnits;
       vacantUnitsCount = Math.max(0, totalUnits - occupiedUnits);
-      occupancyRateVal = totalUnits > 0 ? Math.round((occupiedUnits / totalUnits) * 100) : 0;
+      occupancyRateVal = totalUnits > 0 ? parseFloat(((occupiedUnits / totalUnits) * 100).toFixed(1)) : 0;
       tenantsCount = activeTenantsCount;
       leasesCount = activeLeasesCount;
 

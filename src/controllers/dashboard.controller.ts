@@ -43,7 +43,7 @@ export class DashboardController {
       });
 
       const totalUnits = Math.max(rawTotalUnits, occupiedUnits + vacantUnits);
-      const occupancyRate = totalUnits > 0 ? Math.min(100, Math.round((occupiedUnits / totalUnits) * 100)) : 0;
+      const occupancyRate = totalUnits > 0 ? Math.min(100, parseFloat(((occupiedUnits / totalUnits) * 100).toFixed(1))) : 0;
 
       // Sum rentAmount for active leases
       const activeLeases = await prisma.lease.findMany({
