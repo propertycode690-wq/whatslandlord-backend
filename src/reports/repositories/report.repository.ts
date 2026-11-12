@@ -595,7 +595,7 @@ export class ReportRepository {
       ...(softDeleted.invoices.length > 0 ? { id: { notIn: softDeleted.invoices } } : {}),
       ...(softDeleted.tenants.length > 0 ? { tenantId: { notIn: softDeleted.tenants } } : {}),
       tenant: {
-        status: { notIn: ['Inactive', 'Deleted'] },
+        status: { not: 'Inactive' },
       },
     };
 
