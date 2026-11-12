@@ -2586,29 +2586,49 @@ export class PortalController {
         orderBy: { createdAt: 'desc' },
       });
 
-      const formattedServiceRequests = serviceRequests.map((sr: any) => ({
-        id: sr.id,
-        workOrderNumber: `SR-${sr.id.slice(0, 8).toUpperCase()}`,
-        propertyName: sr.propertyName || 'Property',
-        unitNumber: sr.unitNumber ? (sr.unitNumber.toLowerCase().includes('unit') ? sr.unitNumber : `Unit ${sr.unitNumber}`) : '',
-        issue: sr.title,
-        category: sr.category || (sr.title.toLowerCase().includes('hvac') ? 'HVAC' : sr.title.toLowerCase().includes('plumbing') ? 'Plumbing' : 'General'),
-        priority: sr.priority === 'Normal' ? 'Medium' : sr.priority || 'Medium',
-        status: sr.status === 'Open' || sr.status === 'New' || sr.status === 'Submitted' ? 'New' : sr.status === 'InProgress' || sr.status === 'In Progress' ? 'In Progress' : sr.status === 'Completed' ? 'Completed' : sr.status === 'Closed' ? 'Closed' : sr.status === 'Rejected' ? 'Rejected' : sr.status === 'Assigned' ? 'Assigned' : sr.status || 'New',
-        assignedTechnician: sr.assignedVendorName || sr.assignedTechnician || (vendor ? (vendor.contactName || vendor.companyName) : 'Maintenance Staff'),
-        dueDate: sr.scheduledDate || (sr.createdAt ? new Date(sr.createdAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]),
-        scheduledDate: sr.scheduledDate || null,
-        preferredTime: sr.scheduledDate || (sr.notes?.includes('Preferred Visit:') ? sr.notes.replace('Preferred Visit:', '').trim() : null) || (sr.description?.match(/\[Preferred Visit:\s*([^\]]+)\]/)?.[1]) || null,
-        createdAt: sr.createdAt ? new Date(sr.createdAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
-        description: sr.description || '',
-        estimatedCost: sr.estimatedCost || 0,
-        actualCost: sr.labourCost || sr.cost || 0,
-        labourCost: sr.labourCost || 0,
-        materialsCost: sr.materialsCost || 0,
-        extraExpenses: sr.extraExpenses || 0,
-        rejectReason: sr.status === 'Rejected' ? sr.notes : null,
-        resolutionNotes: sr.status === 'Completed' ? sr.notes : null,
-      }));
+      // Fetch company tenants to provide complete Resident Contact Details
+      const companyTenants = await prisma.tenant.findMany({
+        where: companyId ? { companyId } : {},
+        select: { id: true, firstName: true, lastName: true, email: true, phone: true }
+      });
+      const tenantById = new Map(companyTenants.map((t: any) => [t.id, t]));
+      const tenantByName = new Map(companyTenants.map((t: any) => [`${t.firstName} ${t.lastName}`.toLowerCase().trim(), t]));
+
+      const formattedServiceRequests = serviceRequests.map((sr: any) => {
+        const tenant = sr.tenantId ? tenantById.get(sr.tenantId) : (sr.tenantName ? tenantByName.get(sr.tenantName.toLowerCase().trim()) : null);
+        const residentName = tenant ? `${tenant.firstName} ${tenant.lastName}`.trim() : (sr.tenantName || 'Current Resident');
+        const residentPhone = tenant?.phone || null;
+        const residentEmail = tenant?.email || null;
+
+        return {
+          id: sr.id,
+          workOrderNumber: `SR-${sr.id.slice(0, 8).toUpperCase()}`,
+          propertyName: sr.propertyName || 'Property',
+          unitNumber: sr.unitNumber ? (sr.unitNumber.toLowerCase().includes('unit') ? sr.unitNumber : `Unit ${sr.unitNumber}`) : '',
+          issue: sr.title,
+          category: sr.category || (sr.title.toLowerCase().includes('hvac') ? 'HVAC' : sr.title.toLowerCase().includes('plumbing') ? 'Plumbing' : 'General'),
+          priority: sr.priority === 'Normal' ? 'Medium' : sr.priority || 'Medium',
+          status: sr.status === 'Open' || sr.status === 'New' || sr.status === 'Submitted' ? 'New' : sr.status === 'InProgress' || sr.status === 'In Progress' ? 'In Progress' : sr.status === 'Completed' ? 'Completed' : sr.status === 'Closed' ? 'Closed' : sr.status === 'Rejected' ? 'Rejected' : sr.status === 'Assigned' ? 'Assigned' : sr.status || 'New',
+          assignedTechnician: sr.assignedVendorName || sr.assignedTechnician || (vendor ? (vendor.contactName || vendor.companyName) : 'Maintenance Staff'),
+          dueDate: sr.scheduledDate || (sr.createdAt ? new Date(sr.createdAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]),
+          scheduledDate: sr.scheduledDate || null,
+          preferredTime: sr.scheduledDate || (sr.notes?.includes('Preferred Visit:') ? sr.notes.replace('Preferred Visit:', '').trim() : null) || (sr.description?.match(/\[Preferred Visit:\s*([^\]]+)\]/)?.[1]) || null,
+          createdAt: sr.createdAt ? new Date(sr.createdAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+          description: sr.description || '',
+          tenantId: sr.tenantId || tenant?.id || null,
+          tenantName: residentName,
+          tenantPhone: residentPhone,
+          tenantEmail: residentEmail,
+          permissionToEnter: true,
+          estimatedCost: sr.estimatedCost || 0,
+          actualCost: sr.labourCost || sr.cost || 0,
+          labourCost: sr.labourCost || 0,
+          materialsCost: sr.materialsCost || 0,
+          extraExpenses: sr.extraExpenses || 0,
+          rejectReason: sr.status === 'Rejected' ? sr.notes : null,
+          resolutionNotes: sr.status === 'Completed' ? sr.notes : null,
+        };
+      });
 
       const formattedWorkOrders = workOrders.map((wo: any, index: number) => ({
         id: wo.id,
@@ -2623,6 +2643,7 @@ export class PortalController {
         dueDate: wo.createdAt ? new Date(wo.createdAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
         createdAt: wo.createdAt ? new Date(wo.createdAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
         description: wo.description || '',
+        permissionToEnter: true,
         estimatedCost: wo.estimatedCost || 0,
         actualCost: wo.actualCost || 0,
         labourCost: wo.labourCost || 0,
