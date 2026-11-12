@@ -176,6 +176,10 @@ export class DashboardController {
             if (parsed.propertyId) {
               return activePropertyIds.has(parsed.propertyId);
             }
+            const pName = String(parsed.propertyName || (e as any).propertyName || '').toLowerCase().trim();
+            if (pName && activePropertyNames.has(pName)) {
+              return true;
+            }
             return Boolean(parsed.companyId && parsed.companyId === companyId);
           })
         : allDbExpenses;
@@ -256,9 +260,12 @@ export class DashboardController {
           ...(companyId ? { companyId } : {}),
           status: { notIn: ['Inactive', 'Deleted'] },
         },
-        select: { id: true },
+        select: { id: true, name: true },
       });
       const activePropertyIds = new Set(activePropsForExpenses.map((p) => p.id));
+      const activePropertyNames = new Set(
+        activePropsForExpenses.map((p) => String(p.name || '').toLowerCase().trim()).filter(Boolean)
+      );
 
       const allDbExpenses = await prisma.expense.findMany({});
       const expenses = companyId
@@ -270,6 +277,10 @@ export class DashboardController {
             }
             if (parsed.propertyId) {
               return activePropertyIds.has(parsed.propertyId);
+            }
+            const pName = String(parsed.propertyName || (e as any).propertyName || '').toLowerCase().trim();
+            if (pName && activePropertyNames.has(pName)) {
+              return true;
             }
             return Boolean(parsed.companyId && parsed.companyId === companyId);
           })

@@ -170,6 +170,10 @@ class DashboardController {
                     if (parsed.propertyId) {
                         return activePropertyIds.has(parsed.propertyId);
                     }
+                    const pName = String(parsed.propertyName || e.propertyName || '').toLowerCase().trim();
+                    if (pName && activePropertyNames.has(pName)) {
+                        return true;
+                    }
                     return Boolean(parsed.companyId && parsed.companyId === companyId);
                 })
                 : allDbExpenses;
@@ -241,9 +245,10 @@ class DashboardController {
                     ...(companyId ? { companyId } : {}),
                     status: { notIn: ['Inactive', 'Deleted'] },
                 },
-                select: { id: true },
+                select: { id: true, name: true },
             });
             const activePropertyIds = new Set(activePropsForExpenses.map((p) => p.id));
+            const activePropertyNames = new Set(activePropsForExpenses.map((p) => String(p.name || '').toLowerCase().trim()).filter(Boolean));
             const allDbExpenses = await database_1.default.expense.findMany({});
             const expenses = companyId
                 ? allDbExpenses.filter((e) => {
@@ -257,6 +262,10 @@ class DashboardController {
                     }
                     if (parsed.propertyId) {
                         return activePropertyIds.has(parsed.propertyId);
+                    }
+                    const pName = String(parsed.propertyName || e.propertyName || '').toLowerCase().trim();
+                    if (pName && activePropertyNames.has(pName)) {
+                        return true;
                     }
                     return Boolean(parsed.companyId && parsed.companyId === companyId);
                 })
