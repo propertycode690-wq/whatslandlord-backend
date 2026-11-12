@@ -594,6 +594,7 @@ class PortalController {
         if (companyId) {
             whereClause.companyId = companyId;
         }
+        whereClause.status = { notIn: ['Inactive', 'Deleted'] };
         return database_1.default.property.findMany({
             where: whereClause,
             include: { units: true, buildings: true },

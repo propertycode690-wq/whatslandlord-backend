@@ -592,6 +592,8 @@ export class PortalController {
       whereClause.companyId = companyId;
     }
 
+    whereClause.status = { notIn: ['Inactive', 'Deleted'] };
+
     return prisma.property.findMany({
       where: whereClause,
       include: { units: true, buildings: true },
