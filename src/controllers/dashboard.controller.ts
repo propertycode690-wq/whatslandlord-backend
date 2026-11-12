@@ -123,6 +123,7 @@ export class DashboardController {
         },
       });
       const cleanUnitNumber = (val: any) => String(val || '').replace(/^unit\s+/i, '').toLowerCase().trim();
+      let pendingInvoicesCount = 0;
       const invoicePendingSum = unpaidInvoices.reduce((sum: number, inv: any) => {
         if (softDeleted.invoices.has(inv.id)) return sum;
         const propMatch =
@@ -146,7 +147,11 @@ export class DashboardController {
         if (inv.tenant.unitId && inv.tenant.unitId !== matchedUnit.id) return sum;
 
         const bal = inv.balance !== null && inv.balance !== undefined ? Number(inv.balance) : (Number(inv.amount) || 0) - (Number(inv.paidAmount) || 0);
-        return sum + Math.max(0, bal);
+        if (bal > 0) {
+          pendingInvoicesCount += 1;
+          return sum + bal;
+        }
+        return sum;
       }, 0);
 
       // Pending rent from pending payments (if any)
@@ -223,6 +228,7 @@ export class DashboardController {
           occupancyRate,
           monthlyRevenue: computedMonthlyRevenue,
           pendingRent: pendingRent || 0,
+          pendingInvoicesCount,
           expenses: totalExpenses || 0,
           openMaintenance,
           leasesExpiringSoon,
