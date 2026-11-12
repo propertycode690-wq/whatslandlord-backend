@@ -1164,12 +1164,12 @@ class PortalController {
             });
             const expenses = propExpenses.reduce((sum, exp) => sum + (exp.amount || 0), 0);
             // Real Occupancy Rate
-            const totalUnits = properties.reduce((sum, p) => sum + (p.unitsCount || p.units?.length || 1), 0);
+            const totalUnits = properties.reduce((sum, p) => sum + Math.max(p.unitsCount || 0, p.units?.length || 0, 1), 0);
             const activeUnitsCount = properties.reduce((sum, p) => {
                 const rawUnits = p.units || [];
                 return sum + rawUnits.filter((u) => u.status === 'Occupied').length;
             }, 0);
-            const occupancy = totalUnits > 0 ? Math.round((activeUnitsCount / totalUnits) * 100) : 0;
+            const occupancy = totalUnits > 0 ? Math.min(100, Math.max(0, Math.round((activeUnitsCount / totalUnits) * 100))) : 0;
             // Real Distribution
             const userEmail = req.user?.email;
             const companyId = req.user?.companyId;
@@ -1253,12 +1253,12 @@ class PortalController {
             const monthlyExpenses = propExpenses.reduce((sum, exp) => sum + (exp.amount || 0), 0);
             const netDistribution = monthlyIncome - monthlyExpenses;
             const totalProperties = properties.length;
-            const totalUnits = properties.reduce((sum, p) => sum + (p.unitsCount || p.units?.length || 1), 0);
+            const totalUnits = properties.reduce((sum, p) => sum + Math.max(p.unitsCount || 0, p.units?.length || 0, 1), 0);
             const activeUnitsCount = properties.reduce((sum, p) => {
                 const rawUnits = p.units || [];
                 return sum + rawUnits.filter((u) => u.status === 'Occupied').length;
             }, 0);
-            const computedOccupancy = totalUnits > 0 ? Math.round((activeUnitsCount / totalUnits) * 100) : 0;
+            const computedOccupancy = totalUnits > 0 ? Math.min(100, Math.max(0, Math.round((activeUnitsCount / totalUnits) * 100))) : 0;
             const pendingWorkOrders = await database_1.default.workOrder.count({
                 where: {
                     propertyId: { in: propertyIds },
