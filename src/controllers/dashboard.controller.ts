@@ -45,26 +45,106 @@ export class DashboardController {
       const totalUnits = Math.max(rawTotalUnits, occupiedUnits + vacantUnits);
       const occupancyRate = totalUnits > 0 ? Math.min(100, parseFloat(((occupiedUnits / totalUnits) * 100).toFixed(1))) : 0;
 
-      // Sum rentAmount for active leases
+      // Fetch active properties, active units, and active leases for accurate revenue & pending rent sync
+      const activePropertiesList = await prisma.property.findMany({
+        where: {
+          ...(companyId ? { companyId } : {}),
+          status: { notIn: ['Inactive', 'Draft', 'Deleted'] },
+        },
+        select: { id: true, name: true },
+      });
+      const activePropertyIds = new Set(activePropertiesList.map((p) => p.id));
+      const activePropertyNames = new Set(
+        activePropertiesList.map((p) => String(p.name || '').toLowerCase().trim()).filter(Boolean)
+      );
+
+      // Respect soft-deleted records in restore_bin
+      const softDeleted = {
+        properties: new Set<string>(),
+        units: new Set<string>(),
+        tenants: new Set<string>(),
+        invoices: new Set<string>(),
+      };
+      try {
+        const rows: any[] = await prisma.$queryRawUnsafe(
+          `SELECT entityType, entityId FROM restore_bin ${companyId ? 'WHERE companyId = ? OR companyId IS NULL' : ''}`,
+          ...(companyId ? [companyId] : [])
+        );
+        for (const r of rows || []) {
+          const type = String(r.entityType || '').toLowerCase().replace(/[\s_-]/g, '');
+          const id = String(r.entityId || '');
+          if (!id) continue;
+          if (type === 'property') softDeleted.properties.add(id);
+          else if (type === 'unit') softDeleted.units.add(id);
+          else if (type === 'tenant') softDeleted.tenants.add(id);
+          else if (type === 'invoice') softDeleted.invoices.add(id);
+        }
+      } catch {
+        // restore_bin table may not exist yet; ignore safely
+      }
+
+      const activeUnitsList = await prisma.unit.findMany({
+        where: {
+          propertyId: { in: Array.from(activePropertyIds).filter((id) => !softDeleted.properties.has(id)) },
+        },
+        select: { id: true, unitNumber: true, propertyId: true, status: true, rentAmount: true },
+      });
+      const filteredActiveUnits = activeUnitsList.filter((u) => !softDeleted.units.has(u.id));
+      const activeUnitByIdMap = new Map(filteredActiveUnits.map((u) => [u.id, u]));
+      const occupiedUnitsList = filteredActiveUnits.filter((u) => u.status === 'Occupied');
+
+      // Sum rentAmount per occupied unit (using its active lease if available, else unit rentAmount)
       const activeLeases = await prisma.lease.findMany({
         where: {
           status: 'Active',
           property: {
-            status: { notIn: ['Inactive', 'Deleted'] },
+            status: { notIn: ['Inactive', 'Draft', 'Deleted'] },
           },
           ...(companyId ? { companyId } : {}),
         },
+        select: { id: true, unitId: true, rentAmount: true },
       });
-      const monthlyRevenue = activeLeases.reduce((sum: number, l: any) => sum + (l.rentAmount || 0), 0);
+      const monthlyRevenue = occupiedUnitsList.reduce((sum: number, u: any) => {
+        const activeLease = activeLeases.find((l: any) => l.unitId === u.id);
+        const activeRent = Number(activeLease ? (activeLease.rentAmount ?? u.rentAmount ?? 0) : (u.rentAmount ?? 0));
+        return sum + activeRent;
+      }, 0);
 
-      // Pending rent from unpaid invoices (strictly balance > 0 and unpaid from DB)
+      // Pending rent from unpaid invoices (synced with Web Dashboard & Delinquency Report: active property, active unit, active tenant)
       const unpaidInvoices = await prisma.invoice.findMany({
         where: {
-          status: { notIn: ['Paid', 'Cancelled', 'Void'] },
+          status: { notIn: ['Paid', 'Fully Paid', 'FullyPaid', 'Cancelled', 'Void'] },
           ...(companyId ? { companyId } : {}),
         },
+        include: {
+          tenant: {
+            select: { id: true, status: true, unitId: true },
+          },
+        },
       });
+      const cleanUnitNumber = (val: any) => String(val || '').replace(/^unit\s+/i, '').toLowerCase().trim();
       const invoicePendingSum = unpaidInvoices.reduce((sum: number, inv: any) => {
+        if (softDeleted.invoices.has(inv.id)) return sum;
+        const propMatch =
+          (inv.propertyId && activePropertyIds.has(inv.propertyId) && !softDeleted.properties.has(inv.propertyId)) ||
+          activePropertyNames.has(String(inv.propertyName || '').toLowerCase().trim());
+        if (!propMatch) return sum;
+
+        if (!inv.tenantId || inv.tenantId === 'default' || softDeleted.tenants.has(inv.tenantId)) return sum;
+        if (!inv.tenant || ['Inactive', 'Deleted'].includes(inv.tenant.status)) return sum;
+
+        const invUnitClean = cleanUnitNumber(inv.unitNumber);
+        const matchedUnit =
+          (inv.tenant.unitId ? activeUnitByIdMap.get(inv.tenant.unitId) : null) ||
+          filteredActiveUnits.find(
+            (u: any) =>
+              invUnitClean &&
+              cleanUnitNumber(u.unitNumber) === invUnitClean &&
+              (!inv.propertyId || u.propertyId === inv.propertyId)
+          );
+        if (!matchedUnit) return sum;
+        if (inv.tenant.unitId && inv.tenant.unitId !== matchedUnit.id) return sum;
+
         const bal = inv.balance !== null && inv.balance !== undefined ? Number(inv.balance) : (Number(inv.amount) || 0) - (Number(inv.paidAmount) || 0);
         return sum + Math.max(0, bal);
       }, 0);
@@ -79,16 +159,6 @@ export class DashboardController {
       const paymentsPendingSum = unpaidPayments.reduce((sum: number, p: any) => sum + (Number(p.amount) || 0), 0);
 
       const pendingRent = invoicePendingSum > 0 ? invoicePendingSum : paymentsPendingSum;
-
-      // Sum of all recorded actual expenses for this company from database
-      const activePropsForExpenses = await prisma.property.findMany({
-        where: {
-          ...(companyId ? { companyId } : {}),
-          status: { notIn: ['Inactive', 'Deleted'] },
-        },
-        select: { id: true },
-      });
-      const activePropertyIds = new Set(activePropsForExpenses.map((p) => p.id));
 
       const allDbExpenses = await prisma.expense.findMany({});
       const companyExpenses = companyId

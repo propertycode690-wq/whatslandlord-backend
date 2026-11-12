@@ -595,7 +595,7 @@ export class ReportRepository {
       ...(softDeleted.invoices.length > 0 ? { id: { notIn: softDeleted.invoices } } : {}),
       ...(softDeleted.tenants.length > 0 ? { tenantId: { notIn: softDeleted.tenants } } : {}),
       tenant: {
-        status: { not: 'Inactive' },
+        status: { notIn: ['Inactive', 'Deleted'] },
       },
     };
 
@@ -654,34 +654,53 @@ export class ReportRepository {
     if (sortBy === 'balance') orderBy = { balance: sortOrder };
     if (sortBy === 'amount') orderBy = { amount: sortOrder };
 
-    const [invoices, totalRecords] = await Promise.all([
-      prisma.invoice.findMany({
-        where: whereClause,
-        include: {
-          tenant: {
-            include: {
-              unit: true,
-            },
-          },
-        },
-        orderBy,
-        skip,
-        take: limit,
-      }),
-      prisma.invoice.count({ where: whereClause }),
-    ]);
-
-    const allDelinquentInvoices = await prisma.invoice.findMany({
-      where: whereClause,
+    // Fetch active units in active properties to enforce the same active-unit + tenant-unit sync as the Dashboard
+    const activeUnits = await prisma.unit.findMany({
+      where: {
+        propertyId: { in: activePropertyIds },
+        ...(softDeleted.units.length > 0 ? { id: { notIn: softDeleted.units } } : {}),
+      },
       select: {
-        balance: true,
-        amount: true,
-        paidAmount: true,
-        tenantId: true,
-        tenantName: true,
-        dueDate: true,
+        id: true,
+        unitNumber: true,
+        propertyId: true,
       },
     });
+    const activeUnitByIdMap = new Map(activeUnits.map((u) => [u.id, u]));
+    const cleanUnitNumber = (val: any) => String(val || '').replace(/^unit\s+/i, '').toLowerCase().trim();
+
+    const rawDelinquentInvoices = await prisma.invoice.findMany({
+      where: whereClause,
+      include: {
+        tenant: {
+          include: {
+            unit: true,
+          },
+        },
+      },
+      orderBy,
+    });
+
+    const allDelinquentInvoices = rawDelinquentInvoices.filter((inv) => {
+      if (!inv.tenantId || inv.tenantId === 'default' || !inv.tenant) return false;
+      const invUnitClean = cleanUnitNumber(inv.unitNumber);
+      const matchedUnit =
+        (inv.tenant.unitId ? activeUnitByIdMap.get(inv.tenant.unitId) : null) ||
+        activeUnits.find(
+          (u) =>
+            invUnitClean &&
+            cleanUnitNumber(u.unitNumber) === invUnitClean &&
+            (!inv.propertyId || u.propertyId === inv.propertyId)
+        );
+      if (!matchedUnit) return false;
+      if (inv.tenant.unitId && inv.tenant.unitId !== matchedUnit.id) return false;
+
+      const bal = Number(inv.balance ?? (Number(inv.amount || 0) - Number(inv.paidAmount || 0)));
+      return bal > 0;
+    });
+
+    const totalRecords = allDelinquentInvoices.length;
+    const invoices = allDelinquentInvoices.slice(skip, skip + limit);
 
     let totalDelinquentBalance = 0;
     let totalOriginalAmount = 0;
