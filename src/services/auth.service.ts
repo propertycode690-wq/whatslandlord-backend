@@ -139,9 +139,9 @@ export class AuthService {
     }
   }
 
-  async changePassword(userEmail: string | undefined, currentPass: string, newPass: string) {
-    if (!userEmail) {
-      throw new AppError('Authentication email is required.', 401, 'UNAUTHORIZED');
+  async changePassword(userEmail: string | undefined, currentPass: string, newPass: string, userId?: string) {
+    if (!userEmail && !userId) {
+      throw new AppError('Authentication credentials are required.', 401, 'UNAUTHORIZED');
     }
     if (!currentPass) {
       throw new AppError('Current password is required.', 400, 'BAD_REQUEST');
@@ -151,7 +151,12 @@ export class AuthService {
     }
 
     const user = await prisma.user.findFirst({
-      where: userEmail ? { email: userEmail } : undefined,
+      where: {
+        OR: [
+          ...(userId ? [{ id: userId }] : []),
+          ...(userEmail ? [{ email: userEmail }, { email: userEmail.trim().toLowerCase() }] : []),
+        ],
+      },
     });
 
     if (!user) {

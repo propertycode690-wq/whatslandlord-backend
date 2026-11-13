@@ -42,7 +42,8 @@ export class AuthController {
     try {
       const { currentPassword, newPassword } = req.body;
       const userEmail = req.user?.email;
-      const result = await authService.changePassword(userEmail, currentPassword, newPassword);
+      const userId = req.user?.userId;
+      const result = await authService.changePassword(userEmail, currentPassword, newPassword, userId);
       return sendSuccess({ res, data: result, message: 'Password changed successfully.' });
     } catch (error) {
       next(error);

@@ -130,9 +130,9 @@ class AuthService {
             throw new appError_1.AppError(err.message || 'Invalid or expired refresh token.', 401, 'UNAUTHORIZED');
         }
     }
-    async changePassword(userEmail, currentPass, newPass) {
-        if (!userEmail) {
-            throw new appError_1.AppError('Authentication email is required.', 401, 'UNAUTHORIZED');
+    async changePassword(userEmail, currentPass, newPass, userId) {
+        if (!userEmail && !userId) {
+            throw new appError_1.AppError('Authentication credentials are required.', 401, 'UNAUTHORIZED');
         }
         if (!currentPass) {
             throw new appError_1.AppError('Current password is required.', 400, 'BAD_REQUEST');
@@ -141,7 +141,12 @@ class AuthService {
             throw new appError_1.AppError('New password must be at least 6 characters.', 400, 'BAD_REQUEST');
         }
         const user = await database_1.default.user.findFirst({
-            where: userEmail ? { email: userEmail } : undefined,
+            where: {
+                OR: [
+                    ...(userId ? [{ id: userId }] : []),
+                    ...(userEmail ? [{ email: userEmail }, { email: userEmail.trim().toLowerCase() }] : []),
+                ],
+            },
         });
         if (!user) {
             throw new appError_1.AppError('User not found.', 404, 'NOT_FOUND');
