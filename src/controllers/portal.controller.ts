@@ -306,10 +306,36 @@ export class PortalController {
         return sendSuccess({ res, data: [] });
       }
 
+      const tenantFullName = `${tenant.firstName || ''} ${tenant.lastName || ''}`.trim();
+      const whereConditions: any[] = [{ tenantId: tenant.id }];
+
+      if (tenantFullName) {
+        whereConditions.push({
+          tenantName: tenantFullName,
+        });
+      }
+      if (tenant.unit?.unitNumber) {
+        whereConditions.push({
+          unitNumber: tenant.unit.unitNumber,
+          ...(tenant.unit.property?.name ? { propertyName: tenant.unit.property.name } : {}),
+        });
+      }
+
       const requests = await prisma.serviceRequest.findMany({
-        where: { tenantId: tenant.id },
+        where: {
+          OR: whereConditions,
+        },
         orderBy: { createdAt: 'desc' },
       });
+
+      // Auto-heal missing tenantId for any requests matched by name or unit
+      const unlinkedIds = requests.filter((sr: any) => !sr.tenantId).map((sr: any) => sr.id);
+      if (unlinkedIds.length > 0) {
+        await prisma.serviceRequest.updateMany({
+          where: { id: { in: unlinkedIds } },
+          data: { tenantId: tenant.id },
+        }).catch(() => {});
+      }
 
       const formatted = requests.map((sr: any) => ({
         id: sr.id,
@@ -3554,8 +3580,15 @@ Active Lease Overview:
         orderBy: { startDate: 'desc' },
       }) : null;
 
+      const tenantFullNameAI = tenant ? `${tenant.firstName || ''} ${tenant.lastName || ''}`.trim() : '';
       const activeMaintenance = tenant ? await prisma.serviceRequest.findMany({
-        where: { tenantId: tenant.id },
+        where: {
+          OR: [
+            { tenantId: tenant.id },
+            ...(tenantFullNameAI ? [{ tenantName: tenantFullNameAI }] : []),
+            ...(tenant.unit?.unitNumber ? [{ unitNumber: tenant.unit.unitNumber }] : []),
+          ],
+        },
         orderBy: { createdAt: 'desc' },
         take: 3,
       }) : [];

@@ -72,6 +72,53 @@ class ServiceRequestController {
       let finalVendorName = assignedVendorName || null;
       let finalTechnician = assignedTechnician || null;
 
+      // Auto-resolve tenantId if not provided (e.g. from Web Manager form)
+      let resolvedTenantId = tenantId || null;
+      let resolvedTenantName = tenantName || null;
+
+      if (!resolvedTenantId && req.body.unitId) {
+        const unitTenant = await prisma.tenant.findFirst({
+          where: { unitId: req.body.unitId },
+        });
+        if (unitTenant) {
+          resolvedTenantId = unitTenant.id;
+          if (!resolvedTenantName || resolvedTenantName === 'Unknown Tenant') {
+            resolvedTenantName = `${unitTenant.firstName} ${unitTenant.lastName}`.trim();
+          }
+        }
+      }
+
+      if (!resolvedTenantId && unitNumber && propertyId && propertyId !== 'default') {
+        const unit = await prisma.unit.findFirst({
+          where: { propertyId, unitNumber },
+          include: { tenants: true },
+        });
+        if (unit?.tenants && unit.tenants.length > 0) {
+          resolvedTenantId = unit.tenants[0].id;
+          if (!resolvedTenantName || resolvedTenantName === 'Unknown Tenant') {
+            resolvedTenantName = `${unit.tenants[0].firstName} ${unit.tenants[0].lastName}`.trim();
+          }
+        }
+      }
+
+      if (!resolvedTenantId && resolvedTenantName && resolvedTenantName !== 'Unknown Tenant') {
+        const parts = resolvedTenantName.trim().split(' ');
+        const first = parts[0];
+        const last = parts.slice(1).join(' ');
+        const matchedTenant = await prisma.tenant.findFirst({
+          where: {
+            OR: [
+              { firstName: { contains: first } },
+              ...(last ? [{ lastName: { contains: last } }] : []),
+            ],
+            ...(companyId ? { companyId } : {}),
+          },
+        });
+        if (matchedTenant) {
+          resolvedTenantId = matchedTenant.id;
+        }
+      }
+
       // Auto-assign matching vendor if not manually specified
       if (!finalVendorId) {
         const reqCategory = (category || 'General').toLowerCase();
@@ -106,8 +153,8 @@ class ServiceRequestController {
           propertyId: propertyId || 'default',
           propertyName: propertyName || 'Unknown Property',
           unitNumber: unitNumber || '',
-          tenantId: tenantId || null,
-          tenantName: tenantName || 'Unknown Tenant',
+          tenantId: resolvedTenantId,
+          tenantName: resolvedTenantName || 'Unknown Tenant',
           priority: priority || 'Normal',
           status: status || (finalVendorId ? 'Assigned' : 'New'),
           category: category || 'General',
