@@ -7,6 +7,7 @@ import bcrypt from 'bcrypt';
 import cloudinary from '../config/cloudinary.js';
 import { getManagerCompanyId } from '../utils/companyHelper.js';
 import { ensureRole } from '../utils/roleHelper.js';
+import { emailService } from '../services/email.service';
 
 export class TenantController {
   async getAll(req: AuthenticatedRequest, res: Response, next: NextFunction) {
@@ -233,6 +234,12 @@ export class TenantController {
             roleId: role.id,
             companyId,
           },
+        });
+      }
+
+      if (companyId && email) {
+        emailService.sendTenantWelcomeEmail(companyId, tenant, password).catch((err) => {
+          console.error('[Tenant Registration Email Trigger] Error:', err);
         });
       }
 

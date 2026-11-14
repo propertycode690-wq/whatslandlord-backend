@@ -8,6 +8,7 @@ const database_1 = __importDefault(require("../config/database"));
 const apiResponse_1 = require("../utils/apiResponse");
 const env_1 = require("../config/env");
 const notification_helper_1 = require("../services/notification.helper");
+const email_service_1 = require("../services/email.service");
 class InvoiceController {
     async getAll(req, res, next) {
         try {
@@ -179,6 +180,11 @@ class InvoiceController {
                     companyId,
                 },
             });
+            if (companyId && invoice.tenantId && invoice.tenantId !== 'default' && invoice.status !== 'Draft') {
+                email_service_1.emailService.sendInvoiceGeneratedEmail(companyId, invoice).catch((err) => {
+                    console.error('[Invoice Created Email Trigger] Error:', err);
+                });
+            }
             return (0, apiResponse_1.sendSuccess)({
                 res,
                 statusCode: 201,
@@ -215,6 +221,11 @@ class InvoiceController {
                     }),
                 },
             });
+            if (companyId && invoice.tenantId && invoice.tenantId !== 'default' && status === 'Sent') {
+                email_service_1.emailService.sendInvoiceGeneratedEmail(companyId, invoice).catch((err) => {
+                    console.error('[Invoice Update/Sent Email Trigger] Error:', err);
+                });
+            }
             return (0, apiResponse_1.sendSuccess)({
                 res,
                 data: {

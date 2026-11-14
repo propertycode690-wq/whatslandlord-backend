@@ -1,4 +1,5 @@
 import prisma from '../config/database';
+import { emailService } from './email.service';
 
 // Helper function to get current Date at midnight (00:00:00 UTC) matching America/New_York timezone date
 export function getNewYorkDate(): Date {
@@ -90,7 +91,7 @@ export async function generateAutoInvoices() {
             { description: 'Rent Charge', amount: lease.rentAmount },
           ];
 
-          await prisma.invoice.create({
+          const createdInvoice = await prisma.invoice.create({
             data: {
               tenantId: lease.tenantId,
               tenantName,
@@ -109,6 +110,12 @@ export async function generateAutoInvoices() {
           });
           existingDueDates.add(billingDateStr);
           console.log(`[Auto-Billing (NY)] Created invoice for ${tenantName} for cycle date ${billingDateStr} (amount: $${lease.rentAmount})`);
+
+          if (lease.companyId && createdInvoice.tenantId) {
+            emailService.sendInvoiceGeneratedEmail(lease.companyId, createdInvoice).catch((err) => {
+              console.error('[Auto-Billing Invoice Email Trigger] Error:', err);
+            });
+          }
         }
 
         // Advance to the next billing cycle month

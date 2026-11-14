@@ -5,6 +5,7 @@ import { AuthenticatedRequest } from '../middlewares/auth.middleware';
 
 import { env } from '../config/env';
 import { createNotification } from '../services/notification.helper';
+import { emailService } from '../services/email.service';
 
 class InvoiceController {
   async getAll(req: AuthenticatedRequest, res: Response, next: NextFunction) {
@@ -190,6 +191,12 @@ class InvoiceController {
         },
       });
 
+      if (companyId && invoice.tenantId && invoice.tenantId !== 'default' && invoice.status !== 'Draft') {
+        emailService.sendInvoiceGeneratedEmail(companyId, invoice).catch((err) => {
+          console.error('[Invoice Created Email Trigger] Error:', err);
+        });
+      }
+
       return sendSuccess({
         res,
         statusCode: 201,
@@ -227,6 +234,12 @@ class InvoiceController {
           }),
         },
       });
+
+      if (companyId && invoice.tenantId && invoice.tenantId !== 'default' && status === 'Sent') {
+        emailService.sendInvoiceGeneratedEmail(companyId, invoice).catch((err) => {
+          console.error('[Invoice Update/Sent Email Trigger] Error:', err);
+        });
+      }
 
       return sendSuccess({
         res,

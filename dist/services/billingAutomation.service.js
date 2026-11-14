@@ -8,6 +8,7 @@ exports.parseDateUTC = parseDateUTC;
 exports.generateAutoInvoices = generateAutoInvoices;
 exports.generateAutoLateFees = generateAutoLateFees;
 const database_1 = __importDefault(require("../config/database"));
+const email_service_1 = require("./email.service");
 // Helper function to get current Date at midnight (00:00:00 UTC) matching America/New_York timezone date
 function getNewYorkDate() {
     const nyDateStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
@@ -89,7 +90,7 @@ async function generateAutoInvoices() {
                     const lineItems = [
                         { description: 'Rent Charge', amount: lease.rentAmount },
                     ];
-                    await database_1.default.invoice.create({
+                    const createdInvoice = await database_1.default.invoice.create({
                         data: {
                             tenantId: lease.tenantId,
                             tenantName,
@@ -108,6 +109,11 @@ async function generateAutoInvoices() {
                     });
                     existingDueDates.add(billingDateStr);
                     console.log(`[Auto-Billing (NY)] Created invoice for ${tenantName} for cycle date ${billingDateStr} (amount: $${lease.rentAmount})`);
+                    if (lease.companyId && createdInvoice.tenantId) {
+                        email_service_1.emailService.sendInvoiceGeneratedEmail(lease.companyId, createdInvoice).catch((err) => {
+                            console.error('[Auto-Billing Invoice Email Trigger] Error:', err);
+                        });
+                    }
                 }
                 // Advance to the next billing cycle month
                 elapsedMonths++;

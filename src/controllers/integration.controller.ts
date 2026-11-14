@@ -27,7 +27,7 @@ export class IntegrationController {
       }
 
       const { provider, accountSid, senderId, authToken, status } = req.body;
-      if (!provider || !['TWILIO', 'WHATSAPP', 'STRIPE', 'AUTHORIZE_NET', 'RAZORPAY'].includes(provider)) {
+      if (!provider || !['TWILIO', 'WHATSAPP', 'STRIPE', 'AUTHORIZE_NET', 'RAZORPAY', 'SENDGRID'].includes(provider)) {
         throw new AppError('Bad Request: Invalid integration provider.', 400, 'BAD_REQUEST');
       }
 
@@ -61,7 +61,7 @@ export class IntegrationController {
       }
 
       const { provider, accountSid, senderId, authToken } = req.body;
-      if (!provider || !['TWILIO', 'WHATSAPP', 'STRIPE', 'AUTHORIZE_NET', 'RAZORPAY'].includes(provider)) {
+      if (!provider || !['TWILIO', 'WHATSAPP', 'STRIPE', 'AUTHORIZE_NET', 'RAZORPAY', 'SENDGRID'].includes(provider)) {
         throw new AppError('Bad Request: Invalid integration provider.', 400, 'BAD_REQUEST');
       }
 

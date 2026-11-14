@@ -11,6 +11,7 @@ const bcrypt_1 = __importDefault(require("bcrypt"));
 const cloudinary_js_1 = __importDefault(require("../config/cloudinary.js"));
 const companyHelper_js_1 = require("../utils/companyHelper.js");
 const roleHelper_js_1 = require("../utils/roleHelper.js");
+const email_service_1 = require("../services/email.service");
 class TenantController {
     async getAll(req, res, next) {
         try {
@@ -198,6 +199,11 @@ class TenantController {
                         roleId: role.id,
                         companyId,
                     },
+                });
+            }
+            if (companyId && email) {
+                email_service_1.emailService.sendTenantWelcomeEmail(companyId, tenant, password).catch((err) => {
+                    console.error('[Tenant Registration Email Trigger] Error:', err);
                 });
             }
             return (0, apiResponse_js_1.sendSuccess)({ res, statusCode: 201, data: tenant });

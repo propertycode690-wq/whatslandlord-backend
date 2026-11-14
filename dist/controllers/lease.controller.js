@@ -8,6 +8,7 @@ const lease_service_1 = require("../services/lease.service");
 const apiResponse_1 = require("../utils/apiResponse");
 const appError_1 = require("../utils/appError");
 const database_1 = __importDefault(require("../config/database"));
+const email_service_1 = require("../services/email.service");
 class LeaseController {
     async getAll(req, res, next) {
         try {
@@ -44,6 +45,11 @@ class LeaseController {
                     throw new appError_1.AppError('Tenant not found.', 404, 'NOT_FOUND');
             }
             const lease = await lease_service_1.leaseService.createLease({ ...req.body, companyId });
+            if (companyId && lease?.id) {
+                email_service_1.emailService.sendLeaseCreatedEmail(companyId, lease.id).catch((err) => {
+                    console.error('[Lease Created Email Trigger] Error:', err);
+                });
+            }
             return (0, apiResponse_1.sendSuccess)({ res, statusCode: 201, data: lease });
         }
         catch (error) {

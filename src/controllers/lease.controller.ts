@@ -4,6 +4,7 @@ import { sendSuccess } from '../utils/apiResponse';
 import { AuthenticatedRequest } from '../middlewares/auth.middleware';
 import { AppError } from '../utils/appError';
 import prisma from '../config/database';
+import { emailService } from '../services/email.service';
 
 export class LeaseController {
   async getAll(req: AuthenticatedRequest, res: Response, next: NextFunction) {
@@ -42,6 +43,13 @@ export class LeaseController {
       }
 
       const lease = await leaseService.createLease({ ...req.body, companyId });
+
+      if (companyId && lease?.id) {
+        emailService.sendLeaseCreatedEmail(companyId, lease.id).catch((err) => {
+          console.error('[Lease Created Email Trigger] Error:', err);
+        });
+      }
+
       return sendSuccess({ res, statusCode: 201, data: lease });
     } catch (error) {
       next(error);

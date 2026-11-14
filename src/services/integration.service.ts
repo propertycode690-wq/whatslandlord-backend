@@ -40,6 +40,18 @@ export class IntegrationService {
         hasToken: !!activeIntegrationsMap.get('WHATSAPP')?.encryptedAuthToken,
       },
       {
+        id: 'int-sendgrid',
+        name: 'Twilio SendGrid (Email)',
+        provider: 'SENDGRID',
+        category: 'Communications',
+        description: 'Connect Twilio SendGrid to dispatch automated emails for tenant registrations, leases, and invoices.',
+        logo: '📧',
+        status: activeIntegrationsMap.get('SENDGRID')?.status || 'Inactive',
+        accountSid: activeIntegrationsMap.get('SENDGRID')?.accountSid || '', // From Name (e.g. Property Management)
+        senderId: activeIntegrationsMap.get('SENDGRID')?.senderId || '', // From Email (Verified Sender)
+        hasToken: !!activeIntegrationsMap.get('SENDGRID')?.encryptedAuthToken,
+      },
+      {
         id: 'int-stripe',
         name: 'Stripe Payments',
         provider: 'STRIPE',
@@ -243,6 +255,29 @@ export class IntegrationService {
         }
       } catch (error: any) {
         return { success: false, message: `Razorpay connection failed: ${error.message}` };
+      }
+    } else if (provider === 'SENDGRID') {
+      try {
+        if (!credentials.senderId || !credentials.senderId.includes('@')) {
+          return { success: false, message: 'Invalid Sender Email. Please provide a valid email address.' };
+        }
+
+        const response = await fetch('https://api.sendgrid.com/v3/scopes', {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${rawToken}`,
+          },
+        });
+
+        if (response.status === 200) {
+          return { success: true, message: 'Twilio SendGrid connection successful! API Key verified.' };
+        } else {
+          const body: any = await response.json().catch(() => ({}));
+          const errorMsg = body?.errors?.[0]?.message || `SendGrid authentication failed with status ${response.status}.`;
+          return { success: false, message: errorMsg };
+        }
+      } catch (error: any) {
+        return { success: false, message: `SendGrid verification failed: ${error.message}` };
       }
     }
 

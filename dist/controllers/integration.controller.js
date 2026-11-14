@@ -25,7 +25,7 @@ class IntegrationController {
                 throw new appError_1.AppError('Unauthorized: Company ID not found.', 401, 'UNAUTHORIZED');
             }
             const { provider, accountSid, senderId, authToken, status } = req.body;
-            if (!provider || !['TWILIO', 'WHATSAPP', 'STRIPE', 'AUTHORIZE_NET', 'RAZORPAY'].includes(provider)) {
+            if (!provider || !['TWILIO', 'WHATSAPP', 'STRIPE', 'AUTHORIZE_NET', 'RAZORPAY', 'SENDGRID'].includes(provider)) {
                 throw new appError_1.AppError('Bad Request: Invalid integration provider.', 400, 'BAD_REQUEST');
             }
             const updated = await integration_service_1.integrationService.updateCompanyIntegration(companyId, provider, {
@@ -56,7 +56,7 @@ class IntegrationController {
                 throw new appError_1.AppError('Unauthorized: Company ID not found.', 401, 'UNAUTHORIZED');
             }
             const { provider, accountSid, senderId, authToken } = req.body;
-            if (!provider || !['TWILIO', 'WHATSAPP', 'STRIPE', 'AUTHORIZE_NET', 'RAZORPAY'].includes(provider)) {
+            if (!provider || !['TWILIO', 'WHATSAPP', 'STRIPE', 'AUTHORIZE_NET', 'RAZORPAY', 'SENDGRID'].includes(provider)) {
                 throw new appError_1.AppError('Bad Request: Invalid integration provider.', 400, 'BAD_REQUEST');
             }
             if (!accountSid || !senderId || !authToken) {

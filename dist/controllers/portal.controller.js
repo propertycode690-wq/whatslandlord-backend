@@ -322,10 +322,36 @@ class PortalController {
             if (!tenant) {
                 return (0, apiResponse_1.sendSuccess)({ res, data: [] });
             }
+            const tenantFullName = `${tenant.firstName || ''} ${tenant.lastName || ''}`.trim();
+            const whereConditions = [{ tenantId: tenant.id }];
+            if (tenantFullName && tenant.unit?.unitNumber) {
+                whereConditions.push({
+                    tenantName: tenantFullName,
+                    unitNumber: tenant.unit.unitNumber,
+                    ...(tenant.unit.property?.name ? { propertyName: tenant.unit.property.name } : {}),
+                    ...(tenant.companyId ? { companyId: tenant.companyId } : {}),
+                });
+            }
+            else if (tenantFullName) {
+                whereConditions.push({
+                    tenantName: tenantFullName,
+                    ...(tenant.companyId ? { companyId: tenant.companyId } : {}),
+                });
+            }
             const requests = await database_1.default.serviceRequest.findMany({
-                where: { tenantId: tenant.id },
+                where: {
+                    OR: whereConditions,
+                },
                 orderBy: { createdAt: 'desc' },
             });
+            // Auto-heal missing tenantId for any requests matched by name or unit
+            const unlinkedIds = requests.filter((sr) => !sr.tenantId).map((sr) => sr.id);
+            if (unlinkedIds.length > 0) {
+                await database_1.default.serviceRequest.updateMany({
+                    where: { id: { in: unlinkedIds } },
+                    data: { tenantId: tenant.id },
+                }).catch(() => { });
+            }
             const formatted = requests.map((sr) => ({
                 id: sr.id,
                 title: sr.title,
@@ -3424,8 +3450,21 @@ Active Lease Overview:
                 include: { property: true, unit: true },
                 orderBy: { startDate: 'desc' },
             }) : null;
+            const tenantFullNameAI = tenant ? `${tenant.firstName || ''} ${tenant.lastName || ''}`.trim() : '';
             const activeMaintenance = tenant ? await database_1.default.serviceRequest.findMany({
-                where: { tenantId: tenant.id },
+                where: {
+                    OR: [
+                        { tenantId: tenant.id },
+                        ...(tenantFullNameAI && tenant.unit?.unitNumber
+                            ? [{
+                                    tenantName: tenantFullNameAI,
+                                    unitNumber: tenant.unit.unitNumber,
+                                    ...(tenant.unit.property?.name ? { propertyName: tenant.unit.property.name } : {}),
+                                    ...(tenant.companyId ? { companyId: tenant.companyId } : {}),
+                                }]
+                            : []),
+                    ],
+                },
                 orderBy: { createdAt: 'desc' },
                 take: 3,
             }) : [];
