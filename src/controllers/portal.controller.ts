@@ -309,15 +309,17 @@ export class PortalController {
       const tenantFullName = `${tenant.firstName || ''} ${tenant.lastName || ''}`.trim();
       const whereConditions: any[] = [{ tenantId: tenant.id }];
 
-      if (tenantFullName) {
+      if (tenantFullName && tenant.unit?.unitNumber) {
         whereConditions.push({
           tenantName: tenantFullName,
-        });
-      }
-      if (tenant.unit?.unitNumber) {
-        whereConditions.push({
           unitNumber: tenant.unit.unitNumber,
           ...(tenant.unit.property?.name ? { propertyName: tenant.unit.property.name } : {}),
+          ...(tenant.companyId ? { companyId: tenant.companyId } : {}),
+        });
+      } else if (tenantFullName) {
+        whereConditions.push({
+          tenantName: tenantFullName,
+          ...(tenant.companyId ? { companyId: tenant.companyId } : {}),
         });
       }
 
@@ -3585,8 +3587,14 @@ Active Lease Overview:
         where: {
           OR: [
             { tenantId: tenant.id },
-            ...(tenantFullNameAI ? [{ tenantName: tenantFullNameAI }] : []),
-            ...(tenant.unit?.unitNumber ? [{ unitNumber: tenant.unit.unitNumber }] : []),
+            ...(tenantFullNameAI && tenant.unit?.unitNumber
+              ? [{
+                  tenantName: tenantFullNameAI,
+                  unitNumber: tenant.unit.unitNumber,
+                  ...(tenant.unit.property?.name ? { propertyName: tenant.unit.property.name } : {}),
+                  ...(tenant.companyId ? { companyId: tenant.companyId } : {}),
+                }]
+              : []),
           ],
         },
         orderBy: { createdAt: 'desc' },
