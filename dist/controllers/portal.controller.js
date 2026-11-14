@@ -3199,42 +3199,44 @@ class PortalController {
                         lastName: user.lastName,
                         name: `${user.firstName} ${user.lastName}`.trim(),
                         email: user.email,
-                        phone: user.phone || '(512) 555-0188',
+                        phone: user.phone || '',
                         role: user.role?.name || req.user?.roleName || 'Collection Manager',
-                        department: 'Collections & Revenue',
-                        company: user.company?.name || 'Apex Property Management',
+                        department: user.department || 'Collections',
+                        company: user.company?.name || '',
                     },
                 });
             }
+            const authUser = req.user;
             return (0, apiResponse_1.sendSuccess)({
                 res,
                 data: {
                     id: userId || 'usr-default',
-                    firstName: 'Diya',
-                    lastName: 'Jain',
-                    name: 'Diya Jain',
-                    email: userEmail || 'diya.jain@whatslandlord.com',
-                    phone: '(512) 555-0188',
-                    role: req.user?.roleName || 'Collection Manager',
-                    department: 'Collections & Revenue',
-                    company: 'Apex Property Management',
+                    firstName: authUser?.firstName || '',
+                    lastName: authUser?.lastName || '',
+                    name: authUser?.name || `${authUser?.firstName || ''} ${authUser?.lastName || ''}`.trim() || '',
+                    email: userEmail || authUser?.email || '',
+                    phone: authUser?.phone || '',
+                    role: authUser?.roleName || 'Collection Manager',
+                    department: 'Collections',
+                    company: authUser?.companyName || '',
                 },
             });
         }
         catch (error) {
             console.error('getUserProfile error:', error);
+            const authUser = req?.user;
             return (0, apiResponse_1.sendSuccess)({
                 res,
                 data: {
                     id: 'usr-default',
-                    firstName: 'Diya',
-                    lastName: 'Jain',
-                    name: 'Diya Jain',
-                    email: 'diya.jain@whatslandlord.com',
-                    phone: '(512) 555-0188',
-                    role: 'Collection Manager',
-                    department: 'Collections & Revenue',
-                    company: 'Apex Property Management',
+                    firstName: authUser?.firstName || '',
+                    lastName: authUser?.lastName || '',
+                    name: authUser?.name || '',
+                    email: authUser?.email || '',
+                    phone: authUser?.phone || '',
+                    role: authUser?.roleName || 'Collection Manager',
+                    department: 'Collections',
+                    company: authUser?.companyName || '',
                 },
             });
         }
@@ -3295,14 +3297,14 @@ class PortalController {
                 res,
                 data: {
                     id: userId || 'usr-default',
-                    firstName: updatedFirstName || 'Diya',
-                    lastName: updatedLastName || 'Jain',
-                    name: `${updatedFirstName || 'Diya'} ${updatedLastName || 'Jain'}`.trim(),
-                    email: email || userEmail || 'diya.jain@whatslandlord.com',
-                    phone: phone || '(512) 555-0188',
+                    firstName: updatedFirstName || '',
+                    lastName: updatedLastName || '',
+                    name: `${updatedFirstName || ''} ${updatedLastName || ''}`.trim(),
+                    email: email || userEmail || req.user?.email || '',
+                    phone: phone || '',
                     role: req.user?.roleName || 'Collection Manager',
-                    department: department || 'Collections & Revenue',
-                    company: company || 'Apex Property Management',
+                    department: department || 'Collections',
+                    company: company || '',
                 },
                 message: 'Profile updated successfully.',
             });
@@ -3313,14 +3315,14 @@ class PortalController {
                 res,
                 data: {
                     id: 'usr-default',
-                    firstName: 'Diya',
-                    lastName: 'Jain',
-                    name: 'Diya Jain',
-                    email: 'diya.jain@whatslandlord.com',
-                    phone: '(512) 555-0188',
+                    firstName: '',
+                    lastName: '',
+                    name: '',
+                    email: '',
+                    phone: '',
                     role: 'Collection Manager',
-                    department: 'Collections & Revenue',
-                    company: 'Apex Property Management',
+                    department: 'Collections',
+                    company: '',
                 },
                 message: 'Profile updated.',
             });
